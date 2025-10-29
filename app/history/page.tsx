@@ -1,100 +1,118 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import { supabase } from '@/utils/supabaseClient';
-import { Loader2 } from 'lucide-react';
-import { Card, CardContent } from '@/components/ui/card';
+import { useRouter } from 'next/navigation';
+import { supabase } from '@/lib/supabaseClient';
+import { Loader2, Home } from 'lucide-react';
+import { RideCard } from '@/components/RideCard';
+import { Button } from '@/components/ui/button';
 
 type RideLog = {
   id: string;
-  timestamp: string;
-  phase: string;
-  lat: number;
-  lng: number;
+  phase: string | null;
+  lat: number | null;
+  lng: number | null;
+  speed: number | null;
   distance: number | null;
-  idle_time: number | null;
   duration: number | null;
-  pickup_time?: number | null;
-  ride_time?: number | null;
+  idle_time: number | null;
+  created_at: string;
 };
 
 export default function HistoryPage() {
-  const [logs, setLogs] = useState<RideLog[]>([]);
+  const [rides, setRides] = useState<RideLog[]>([]);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const router = useRouter();
 
   useEffect(() => {
-    async function fetchLogs() {
-      const { data, error } = await supabase
-        .from('ride_logs')
-        .select('*')
-        .order('timestamp', { ascending: false })
-        .limit(50);
+    // Fetch rides
+    const fetchRides = async () => {
+      try {
+        const { data, error } = await supabase
+          .from('ride_logs')
+          .select('*')
+          .order('created_at', { ascending: false });
 
-      if (error) console.error('Supabase fetch error:', error);
-      else setLogs(data || []);
-      setLoading(false);
-    }
+        if (error) throw error;
+        setRides(data || []);
+      } catch (err: any) {
+        setError(err.message);
+      } finally {
+        setLoading(false);
+      }
+    };
 
-    fetchLogs();
+    fetchRides();
+
+    // Subscribe to realtime changes
+    const channel = supabase
+      .channel('ride_logs_realtime')
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'ride_logs' },
+        async () => {
+          const { data } = await supabase
+            .from('ride_logs')
+            .select('*')
+            .order('created_at', { ascending: false });
+          setRides(data || []);
+        }
+      )
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
   }, []);
 
   if (loading) {
     return (
-      <div className="flex justify-center items-center min-h-screen">
-        <Loader2 className="animate-spin h-6 w-6 text-gray-400" />
+      <div className="flex justify-center items-center h-screen text-muted-foreground">
+        <Loader2 className="w-6 h-6 mr-2 animate-spin" />
+        Loading rides...
+      </div>
+    );
+  }
+
+  if (error) {
+    return (
+      <div className="text-center text-red-500 p-4">
+        Failed to load rides: {error}
+      </div>
+    );
+  }
+
+  if (rides.length === 0) {
+    return (
+      <div className="flex flex-col items-center justify-center h-screen text-muted-foreground space-y-4">
+        <div>
+          <p className="text-lg">No rides recorded yet.</p>
+          <p className="text-sm">Start a ride to see it appear here!</p>
+        </div>
+        <Button onClick={() => router.push('/')} className="mt-4 flex items-center gap-2">
+          <Home className="w-4 h-4" />
+          Go Home
+        </Button>
       </div>
     );
   }
 
   return (
-    <div className="p-4 space-y-3">
+    <div className="max-w-3xl mx-auto p-4 space-y-4">
       <h1 className="text-2xl font-semibold mb-4">Ride History</h1>
 
-      {logs.length === 0 ? (
-        <p className="text-gray-500">No rides logged yet.</p>
-      ) : (
-        logs.map((log) => (
-          <Card key={log.id} className="rounded-2xl shadow-md border border-gray-200">
-            <CardContent className="p-4">
-              <div className="flex justify-between items-center mb-2">
-                <span className="font-medium capitalize">{log.phase}</span>
-                <span className="text-sm text-gray-500">
-                  {new Date(log.timestamp).toLocaleString()}
-                </span>
-              </div>
+      {rides.map((ride) => (
+        <RideCard key={ride.id} ride={ride} />
+      ))}
 
-              <div className="grid grid-cols-2 gap-y-1 text-sm text-gray-700">
-                <div>
-                  Distance:{' '}
-                  <span className="font-semibold">{(log.distance ?? 0).toFixed(1)} m</span>
-                </div>
-                <div>
-                  Idle Time: <span className="font-semibold">{log.idle_time ?? 0}s</span>
-                </div>
-                <div>
-                  Duration: <span className="font-semibold">{log.duration ?? 0}s</span>
-                </div>
-                {log.pickup_time != null && (
-                  <div>
-                    Pickup Time: <span className="font-semibold">{log.pickup_time}s</span>
-                  </div>
-                )}
-                {log.ride_time != null && (
-                  <div>
-                    Ride Time: <span className="font-semibold">{log.ride_time}s</span>
-                  </div>
-                )}
-                <div>
-                  Coords:{' '}
-                  <span className="font-mono text-xs">
-                    {log.lat?.toFixed(5)}, {log.lng?.toFixed(5)}
-                  </span>
-                </div>
-              </div>
-            </CardContent>
-          </Card>
-        ))
-      )}
+      {/* Bottom Button */}
+      <div className="flex justify-center pt-6">
+        <Button onClick={() => router.push('/')} className="flex items-center gap-2">
+          <Home className="w-4 h-4" />
+          Go Home
+        </Button>
+      </div>
     </div>
   );
 }
