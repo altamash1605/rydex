@@ -184,7 +184,6 @@ export default function MapView() {
           scrollWheelZoom
           dragging
           touchZoom
-          tap={false}
         >
           {/* 👇 ensures mapRef is always set */}
           <MapRefBinder onReady={(map) => (mapRef.current = map)} />
