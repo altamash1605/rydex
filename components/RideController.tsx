@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { haptics } from '@/utils/haptics';
+import { haptics as baseHaptics } from '@/utils/haptics';
 
 // --- helpers ---
 function haversineM(a: [number, number], b: [number, number]) {
@@ -43,6 +43,13 @@ export default function RideController() {
   const watchIdRef = useRef<number | null>(null);
   const lastPointRef = useRef<[number, number] | null>(null);
   const wasIdleRef = useRef(false);
+
+  // 🔹 combine imported haptics with local ones
+  const haptics = {
+    ...baseHaptics,
+    pickupStart: baseHaptics?.pickupStart ?? (() => navigator.vibrate?.(100)),
+    abortPickup: baseHaptics?.abortPickup ?? (() => navigator.vibrate?.([80, 80, 80])),
+  };
 
   // 🔹 Tick every second
   useEffect(() => {
