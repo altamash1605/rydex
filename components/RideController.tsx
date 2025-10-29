@@ -44,11 +44,12 @@ export default function RideController() {
   const lastPointRef = useRef<[number, number] | null>(null);
   const wasIdleRef = useRef(false);
 
-  // 🔹 combine imported haptics with local ones
+  // 🔹 safely extend haptics with optional fields
+  const base = baseHaptics as Record<string, any>;
   const haptics = {
-    ...baseHaptics,
-    pickupStart: baseHaptics?.pickupStart ?? (() => navigator.vibrate?.(100)),
-    abortPickup: baseHaptics?.abortPickup ?? (() => navigator.vibrate?.([80, 80, 80])),
+    ...base,
+    pickupStart: base?.pickupStart ?? (() => navigator.vibrate?.(100)),
+    abortPickup: base?.abortPickup ?? (() => navigator.vibrate?.([80, 80, 80])),
   };
 
   // 🔹 Tick every second
