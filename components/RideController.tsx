@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { haptics as baseHaptics } from '@/utils/haptics';
+import { logRide } from '@/utils/logRide'; // ✅ Added import
 
 // --- helpers ---
 function haversineM(a: [number, number], b: [number, number]) {
@@ -94,6 +95,15 @@ export default function RideController() {
       if (!wasIdleRef.current) {
         haptics.idle?.() ?? navigator.vibrate?.(50);
         wasIdleRef.current = true;
+
+        // ✅ Log when entering idle phase
+        logRide({
+          phase: 'idle',
+          lat: lastPointRef.current?.[0] ?? 0,
+          lng: lastPointRef.current?.[1] ?? 0,
+          speed: 0,
+          idle_time: secs,
+        });
       }
     } else {
       setIdle(false);
@@ -128,6 +138,15 @@ export default function RideController() {
       setIdle(false);
       setIdleStartAt(null);
       haptics.pickupStart?.() ?? navigator.vibrate?.(100);
+
+      // ✅ Log pickup start
+      logRide({
+        phase: 'toPickup',
+        lat: lastPointRef.current?.[0] ?? 0,
+        lng: lastPointRef.current?.[1] ?? 0,
+        speed: 0,
+        pickup_time: 0,
+      });
     };
 
     const abortPickup = () => {
@@ -137,6 +156,14 @@ export default function RideController() {
       setPickupSec(0);
       setIdleStartAt(Date.now() + 15000);
       haptics.abortPickup?.() ?? navigator.vibrate?.([80, 80, 80]);
+
+      // ✅ Log pickup abort
+      logRide({
+        phase: 'idle',
+        lat: lastPointRef.current?.[0] ?? 0,
+        lng: lastPointRef.current?.[1] ?? 0,
+        speed: 0,
+      });
     };
 
     const startRide = () => {
@@ -150,10 +177,20 @@ export default function RideController() {
       lastPointRef.current = null;
       haptics.startRide?.() ?? navigator.vibrate?.([80, 40, 80]);
 
+      // ✅ Log ride start
+      logRide({
+        phase: 'riding',
+        lat: lastPointRef.current?.[0] ?? 0,
+        lng: lastPointRef.current?.[1] ?? 0,
+        speed: 0,
+        distance: 0,
+        duration: 0,
+      });
+
       // Start GPS
       if (navigator.geolocation) {
         watchIdRef.current = navigator.geolocation.watchPosition(
-          (pos) => {
+          async (pos) => {
             const p: [number, number] = [
               pos.coords.latitude,
               pos.coords.longitude,
@@ -164,6 +201,16 @@ export default function RideController() {
               if (d < 500) setDistanceM((m) => m + d);
             }
             lastPointRef.current = p;
+
+            // ✅ Log GPS update
+            await logRide({
+              phase: 'riding',
+              lat: p[0],
+              lng: p[1],
+              speed: pos.coords.speed ?? 0,
+              distance: distanceM,
+              duration: rideSec,
+            });
           },
           (err) => console.warn('GPS error', err),
           { enableHighAccuracy: true, timeout: 15000, maximumAge: 0 }
@@ -194,6 +241,17 @@ export default function RideController() {
       window.dispatchEvent(
         new CustomEvent('rydex-ride-finished', { detail: payload })
       );
+
+      // ✅ Log ride end
+      logRide({
+        phase: 'idle',
+        lat: lastPointRef.current?.[0] ?? 0,
+        lng: lastPointRef.current?.[1] ?? 0,
+        speed: 0,
+        distance: distanceM,
+        duration: rideSec,
+        ride_time: rideSec,
+      });
     };
 
     window.addEventListener('rydex-pickup-start', startPickup);
@@ -207,7 +265,7 @@ export default function RideController() {
       window.removeEventListener('rydex-ride-start', startRide);
       window.removeEventListener('rydex-ride-end', endRide);
     };
-  }, [phase, rideStartAt, distanceM, points]);
+  }, [phase, rideStartAt, distanceM, points, rideSec]);
 
   return null;
 }
