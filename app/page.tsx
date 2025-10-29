@@ -9,19 +9,19 @@ import RideController from '@/components/RideController'; // ← ensure this exa
 export default function Home() {
   return (
     <main className="relative h-screen w-screen">
+      {/* Map layer */}
       <div className="absolute inset-0 z-0">
         <MapView />
       </div>
 
-      <ButtonBar
-        primaryLabel="Start Ride"
-        secondaryLabel="End Ride"
-        onPrimary={() => window.dispatchEvent(new Event('rydex-ride-start'))}
-        onSecondary={() => window.dispatchEvent(new Event('rydex-ride-end'))}
-      />
+      {/* Ride control buttons */}
+      <ButtonBar />
 
+      {/* Live speed display */}
       <SpeedHUD />
-      <RideController />   {/* ← must be present */}
+
+      {/* Core ride logic and events */}
+      <RideController />
     </main>
   );
 }
