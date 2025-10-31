@@ -80,15 +80,19 @@ export default function MapView() {
 
   const lerp = (a: number, b: number, t: number) => a + (b - a) * t;
 
-  // ✅ Smooth marker glide animation
+  // ✅ Smooth marker glide animation (easeOutCubic + distance-based)
   useEffect(() => {
     let startTime: number | null = null;
-    const duration = 1000;
 
     const animate = (time: number) => {
       if (!position || !targetPos) return;
+
+      const dist = haversineM(position, targetPos);
+      const duration = Math.min(2000, Math.max(300, dist * 20)); // adaptive duration
       if (startTime === null) startTime = time;
-      const t = Math.min((time - startTime) / duration, 1);
+
+      const linearT = Math.min((time - startTime) / duration, 1);
+      const t = 1 - Math.pow(1 - linearT, 3); // easeOutCubic easing
 
       const newLat = lerp(position[0], targetPos[0], t);
       const newLng = lerp(position[1], targetPos[1], t);
@@ -99,7 +103,7 @@ export default function MapView() {
         mapRef.current.panTo(newPos, { animate: false });
       }
 
-      if (t < 1) {
+      if (linearT < 1) {
         animRef.current = requestAnimationFrame(animate);
       } else {
         animRef.current = null;
@@ -164,7 +168,7 @@ export default function MapView() {
     return () => window.removeEventListener('rydex-recenter', handleRecenter);
   }, [hasMounted, position]);
 
-  // --- Detect manual panning (build-safe fix) ---
+  // --- Detect manual panning (build-safe) ---
   useEffect(() => {
     if (!hasMounted) return;
     const map = mapRef.current;
@@ -180,7 +184,7 @@ export default function MapView() {
     return () => {
       map.off('dragstart', stopFollowing);
     };
-  }, [hasMounted]); // ✅ returns void always (fixes build error)
+  }, [hasMounted]);
 
   if (!hasMounted) return null;
   if (!position)
