@@ -1,10 +1,13 @@
 // app/page.tsx
 'use client';
 
-import MapView from '@/components/MapView';
+import dynamic from 'next/dynamic';
 import ButtonBar from '@/components/ButtonBar';
 import SpeedHUD from '@/components/SpeedHUD';
-import RideController from '@/components/RideController'; // ← ensure this exact path/case
+import RideController from '@/components/RideController';
+
+// 👇 dynamically import MapView so Leaflet never runs on the server
+const MapView = dynamic(() => import('@/components/MapView'), { ssr: false });
 
 export default function Home() {
   return (
