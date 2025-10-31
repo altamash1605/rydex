@@ -2,16 +2,28 @@
 
 import dynamic from 'next/dynamic';
 import { useEffect, useRef, useState } from 'react';
-import { useMapEvents, Circle } from 'react-leaflet';
 import type { Map as LeafletMap } from 'leaflet';
 import 'leaflet/dist/leaflet.css';
 import RecenterButton from '@/components/RecenterButton';
 
+// Dynamic imports (client-only)
 const MapContainer = dynamic(() => import('react-leaflet').then((m) => m.MapContainer), { ssr: false });
 const TileLayer = dynamic(() => import('react-leaflet').then((m) => m.TileLayer), { ssr: false });
 const Marker = dynamic(() => import('react-leaflet').then((m) => m.Marker), { ssr: false });
 const Tooltip = dynamic(() => import('react-leaflet').then((m) => m.Tooltip), { ssr: false });
 const Polyline = dynamic(() => import('react-leaflet').then((m) => m.Polyline), { ssr: false });
+const Circle = dynamic(() => import('react-leaflet').then((m) => m.Circle), { ssr: false });
+const MapRefBinder = dynamic(() =>
+  import('react-leaflet').then((m) => ({
+    default: function MapRefBinder({ onReady }: { onReady: (map: LeafletMap) => void }) {
+      const map = m.useMapEvents({});
+      useEffect(() => {
+        if (map) onReady(map);
+      }, [map, onReady]);
+      return null;
+    },
+  }))
+);
 
 type RideStats = {
   phase?: 'idle' | 'toPickup' | 'riding';
@@ -37,7 +49,7 @@ const DEFAULT_STATS: RideStats = {
   avgSpeedKmh: 0,
 };
 
-// --- helpers ---
+// --- helper ---
 function haversineM(a: [number, number], b: [number, number]) {
   const R = 6371000;
   const toRad = (d: number) => (d * Math.PI) / 180;
@@ -51,16 +63,8 @@ function haversineM(a: [number, number], b: [number, number]) {
   return 2 * R * Math.atan2(Math.sqrt(s), Math.sqrt(1 - s));
 }
 
-// ✅ binds live map instance
-function MapRefBinder({ onReady }: { onReady: (map: LeafletMap) => void }) {
-  const map = useMapEvents({});
-  useEffect(() => {
-    if (map) onReady(map);
-  }, [map, onReady]);
-  return null;
-}
-
 export default function MapView() {
+  const [hasMounted, setHasMounted] = useState(false);
   const [position, setPosition] = useState<[number, number] | null>(null);
   const [stats, setStats] = useState<RideStats>(DEFAULT_STATS);
   const [path, setPath] = useState<[number, number][]>([]);
@@ -70,31 +74,29 @@ export default function MapView() {
   const followMarkerRef = useRef(true);
   const lastPositionRef = useRef<[number, number] | null>(null);
 
+  // ✅ Avoid SSR: run map only on client
+  useEffect(() => {
+    setHasMounted(true);
+  }, []);
+
   // --- Geolocation watch + movement filter ---
   useEffect(() => {
+    if (!hasMounted || typeof navigator === 'undefined') return;
+
     import('leaflet-defaulticon-compatibility').then(() =>
       import('leaflet-defaulticon-compatibility/dist/leaflet-defaulticon-compatibility.css')
     );
-
-    if (!navigator.geolocation) return;
 
     const watch = navigator.geolocation.watchPosition(
       (pos) => {
         const coords: [number, number] = [pos.coords.latitude, pos.coords.longitude];
         const last = lastPositionRef.current;
-
-        // 🚫 Ignore tiny movements
         if (last && haversineM(last, coords) < 3) return;
 
         lastPositionRef.current = coords;
-
-        // ✅ Immediately update marker position
         setPosition(coords);
+        setPath((p) => [...p, coords]);
 
-        // ✅ Append to path
-        setPath((prev) => [...prev, coords]);
-
-        // ✅ Follow marker if recenter mode is active
         if (followMarkerRef.current && mapRef.current && !isUserPanned) {
           mapRef.current.setView(coords, mapRef.current.getZoom(), { animate: true });
         }
@@ -104,32 +106,34 @@ export default function MapView() {
     );
 
     return () => navigator.geolocation.clearWatch(watch);
-  }, [isUserPanned]);
+  }, [hasMounted, isUserPanned]);
 
-  // --- Listen for ride stats updates ---
+  // --- Ride stats ---
   useEffect(() => {
+    if (!hasMounted) return;
     const onStats = (e: Event) => {
       const ce = e as CustomEvent<RideStats>;
       if (ce.detail) setStats(ce.detail);
     };
     window.addEventListener('rydex-ride-stats', onStats as EventListener);
     return () => window.removeEventListener('rydex-ride-stats', onStats as EventListener);
-  }, []);
+  }, [hasMounted]);
 
-  // --- Listen for external path append events ---
+  // --- Path append ---
   useEffect(() => {
+    if (!hasMounted) return;
     const onAppend = (e: Event) => {
       const ce = e as CustomEvent<[number, number]>;
       if (ce.detail) setPath((p) => [...p, ce.detail]);
     };
     window.addEventListener('rydex-path-append', onAppend as EventListener);
     return () => window.removeEventListener('rydex-path-append', onAppend as EventListener);
-  }, []);
+  }, [hasMounted]);
 
-  // --- Listen for RecenterButton event ---
+  // --- Recenter button ---
   useEffect(() => {
+    if (!hasMounted) return;
     const handleRecenter = () => {
-      console.log('📍 Recenter event received');
       followMarkerRef.current = true;
       setIsUserPanned(false);
       if (mapRef.current && position) {
@@ -138,10 +142,11 @@ export default function MapView() {
     };
     window.addEventListener('rydex-recenter', handleRecenter);
     return () => window.removeEventListener('rydex-recenter', handleRecenter);
-  }, [position]);
+  }, [hasMounted, position]);
 
   // --- Detect manual panning ---
   useEffect(() => {
+    if (!hasMounted) return;
     const map = mapRef.current;
     if (!map) return;
 
@@ -151,19 +156,18 @@ export default function MapView() {
     };
 
     map.on('dragstart', stopFollowing);
-
     return () => {
       map.off('dragstart', stopFollowing);
     };
-  }, []); // run only once
+  }, [hasMounted]);
 
-  if (!position) {
+  if (!hasMounted) return null;
+  if (!position)
     return (
       <div className="flex items-center justify-center h-full w-full bg-gray-100">
         <p className="text-gray-600">Fetching location...</p>
       </div>
     );
-  }
 
   const fmt = (s?: number) => {
     if (!s || isNaN(s)) return '00:00:00';
@@ -193,12 +197,11 @@ export default function MapView() {
             url="https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png"
           />
 
-          {/* 🛣️ Path line */}
           {path.length > 1 && (
             <Polyline positions={path} pathOptions={{ color: '#808080', weight: 4, opacity: 0.9 }} />
           )}
 
-          {/* 🟦 Pulsing blue circle under marker */}
+          {/* 🟦 Pulsing blue circle */}
           <Circle
             center={position}
             radius={12}
@@ -236,10 +239,9 @@ export default function MapView() {
         </MapContainer>
       </div>
 
-      {/* ✅ external recenter button */}
       <RecenterButton visible={true} />
 
-      {/* 🌊 Simple CSS pulse animation */}
+      {/* 🌊 Pulse effect */}
       <style jsx global>{`
         .leaflet-interactive {
           animation: pulse 2s infinite;
