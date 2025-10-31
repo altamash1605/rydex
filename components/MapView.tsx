@@ -7,6 +7,7 @@ import type { Map as LeafletMap } from 'leaflet';
 import 'leaflet/dist/leaflet.css';
 import RecenterButton from '@/components/RecenterButton';
 
+// --- Dynamic imports (client-only Leaflet components) ---
 const MapContainer = dynamic(() => import('react-leaflet').then((m) => m.MapContainer), { ssr: false });
 const TileLayer = dynamic(() => import('react-leaflet').then((m) => m.TileLayer), { ssr: false });
 const Marker = dynamic(() => import('react-leaflet').then((m) => m.Marker), { ssr: false });
@@ -26,6 +27,7 @@ const MapRefBinder = dynamic(() =>
   }))
 );
 
+// --- Types ---
 type RideStats = {
   phase?: 'idle' | 'toPickup' | 'riding';
   active?: boolean;
@@ -50,7 +52,7 @@ const DEFAULT_STATS: RideStats = {
   avgSpeedKmh: 0,
 };
 
-// --- helpers ---
+// --- Helpers ---
 function haversineM(a: [number, number], b: [number, number]) {
   const R = 6371000;
   const toRad = (d: number) => (d * Math.PI) / 180;
@@ -64,6 +66,7 @@ function haversineM(a: [number, number], b: [number, number]) {
   return 2 * R * Math.atan2(Math.sqrt(s), Math.sqrt(1 - s));
 }
 
+// --- Component ---
 export default function MapView() {
   const [hasMounted, setHasMounted] = useState(false);
   const [stats, setStats] = useState<RideStats>(DEFAULT_STATS);
@@ -72,14 +75,15 @@ export default function MapView() {
   const mapRef = useRef<LeafletMap | null>(null);
   const followMarkerRef = useRef(true);
   const lastPosRef = useRef<[number, number] | null>(null);
+  const lastTimeRef = useRef<number | null>(null);
 
-  // --- smooth springs for lat/lng ---
+  // --- Smooth motion springs ---
   const latSpring = useSpring(0, { stiffness: 60, damping: 15 });
   const lngSpring = useSpring(0, { stiffness: 60, damping: 15 });
 
   const [position, setPosition] = useState<[number, number] | null>(null);
 
-  // --- watch GPS ---
+  // --- GPS Watch with adaptive filtering ---
   useEffect(() => {
     if (!hasMounted || typeof navigator === 'undefined') return;
 
@@ -90,16 +94,35 @@ export default function MapView() {
     const watch = navigator.geolocation.watchPosition(
       (pos) => {
         const coords: [number, number] = [pos.coords.latitude, pos.coords.longitude];
+        const now = Date.now();
+
         const last = lastPosRef.current;
-        if (last && haversineM(last, coords) < 3) return; // ignore tiny jitter
+        const lastTime = lastTimeRef.current;
+        const dt = lastTime ? (now - lastTime) / 1000 : 1; // seconds
+
+        if (last) {
+          const dist = haversineM(last, coords); // meters
+          const speed = dist / dt; // m/s
+
+          // Ignore tiny jitter
+          if (dist < 3) return;
+
+          // 🚀 Adaptive filtering — skip updates if moving fast
+          if (speed > 10 && dt < 3) return; // >36 km/h, only once every 3s
+          if (speed > 3 && dt < 1.5) return; // 10–36 km/h, every 1.5s
+        }
+
+        // Store current for next cycle
         lastPosRef.current = coords;
+        lastTimeRef.current = now;
+
+        // Update position and springs
         setPosition(coords);
         setPath((p) => [...p, coords]);
-
-        // move springs
         latSpring.set(coords[0]);
         lngSpring.set(coords[1]);
 
+        // Auto-follow
         if (followMarkerRef.current && mapRef.current && !isUserPanned) {
           mapRef.current.setView(coords, mapRef.current.getZoom(), { animate: true });
         }
@@ -113,15 +136,16 @@ export default function MapView() {
     };
   }, [hasMounted, isUserPanned, latSpring, lngSpring]);
 
-  // --- compute smoothed position ---
+  // --- Compute smoothed position from springs ---
   const smoothLat = latSpring.get();
   const smoothLng = lngSpring.get();
   const smoothPosition: [number, number] | null =
     position ? [smoothLat, smoothLng] : null;
 
+  // --- Mount detection ---
   useEffect(() => setHasMounted(true), []);
 
-  // --- recenter handler ---
+  // --- Recenter Button ---
   useEffect(() => {
     if (!hasMounted) return;
     const handleRecenter = () => {
@@ -137,7 +161,7 @@ export default function MapView() {
     };
   }, [hasMounted, position]);
 
-  // --- detect manual panning (build-safe) ---
+  // --- Detect manual panning (build-safe) ---
   useEffect(() => {
     if (!hasMounted) return;
     const map = mapRef.current;
@@ -149,8 +173,6 @@ export default function MapView() {
     };
 
     map.on('dragstart', stopFollowing);
-
-    // ✅ explicit cleanup, returns void
     return () => {
       map.off('dragstart', stopFollowing);
     };
@@ -169,7 +191,7 @@ export default function MapView() {
     return date.toISOString().substring(11, 19);
   };
 
-  // --- render ---
+  // --- Render ---
   return (
     <div className="relative h-full w-full z-0">
       <div className="absolute inset-0 z-0">
@@ -192,12 +214,11 @@ export default function MapView() {
             url="https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png"
           />
 
-          {/* path line */}
           {path.length > 1 && (
             <Polyline positions={path} pathOptions={{ color: '#808080', weight: 4, opacity: 0.9 }} />
           )}
 
-          {/* blue dot */}
+          {/* Blue location dot */}
           <Circle
             center={smoothPosition}
             radius={6}
@@ -209,7 +230,7 @@ export default function MapView() {
             }}
           />
 
-          {/* tooltip marker */}
+          {/* Tooltip marker */}
           <Marker position={smoothPosition}>
             <Tooltip permanent direction="top" offset={[0, -10]}>
               <div className="text-xs">
