@@ -4,7 +4,7 @@ import { Crosshair } from 'lucide-react';
 import { useState } from 'react';
 
 type Props = {
-  onClick: () => void;
+  onClick?: () => void;
   visible?: boolean;
 };
 
@@ -13,14 +13,23 @@ export default function RecenterButton({ onClick, visible = true }: Props) {
 
   if (!visible) return null;
 
+  const handleClick = () => {
+    console.log('🧭 Recenter button clicked!');
+    setClicked(true);
+
+    // 🔹 Fire a global event so MapView can recenter
+    window.dispatchEvent(new CustomEvent('rydex-recenter'));
+
+    // 🔹 Support any local click handler (backward compatible)
+    if (onClick) onClick();
+
+    // Reset visual state
+    setTimeout(() => setClicked(false), 300);
+  };
+
   return (
     <button
-      onClick={() => {
-        console.log('🧭 Button clicked!');
-        setClicked(true);
-        onClick();
-        setTimeout(() => setClicked(false), 300);
-      }}
+      onClick={handleClick}
       style={{
         position: 'fixed',
         bottom: '20px',
