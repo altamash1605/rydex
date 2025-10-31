@@ -8,19 +8,23 @@ import L from 'leaflet';
 import 'leaflet/dist/leaflet.css';
 import RecenterButton from '@/components/RecenterButton';
 
-// ---- dynamic leaflet pieces ----
-const MapContainer = dynamic(() => import('react-leaflet').then(m => m.MapContainer), { ssr: false });
-const TileLayer = dynamic(() => import('react-leaflet').then(m => m.TileLayer), { ssr: false });
-const Marker = dynamic(() => import('react-leaflet').then(m => m.Marker), { ssr: false });
-const Polyline = dynamic(() => import('react-leaflet').then(m => m.Polyline), { ssr: false });
-const Circle = dynamic(() => import('react-leaflet').then(m => m.Circle), { ssr: false });
+// ---- Dynamic Leaflet imports ----
+const MapContainer = dynamic(() => import('react-leaflet').then((m) => m.MapContainer), { ssr: false });
+const TileLayer = dynamic(() => import('react-leaflet').then((m) => m.TileLayer), { ssr: false });
+const Marker = dynamic(() => import('react-leaflet').then((m) => m.Marker), { ssr: false });
+const Polyline = dynamic(() => import('react-leaflet').then((m) => m.Polyline), { ssr: false });
+const Circle = dynamic(() => import('react-leaflet').then((m) => m.Circle), { ssr: false });
+
 const MapRefBinder = dynamic(() =>
-  import('react-leaflet').then(m => ({
+  import('react-leaflet').then((m) => ({
     default: function MapRefBinder({ onReady }: { onReady: (map: LeafletMap) => void }) {
       const map = m.useMapEvents({});
-      useEffect(() => { if (map) onReady(map); }, [map, onReady]);
+      useEffect(() => {
+        if (map) onReady(map);
+        return; // ✅ explicitly return void
+      }, [map, onReady]);
       return null;
-    }
+    },
   }))
 );
 
@@ -43,9 +47,10 @@ const DEFAULT_STATS: RideStats = {
   rideSec: 0,
   durationSec: 0,
   distanceM: 0,
-  avgSpeedKmh: 0
+  avgSpeedKmh: 0,
 };
 
+// --- Helper: Haversine ---
 function haversineM(a: [number, number], b: [number, number]) {
   const R = 6371000;
   const toRad = (d: number) => (d * Math.PI) / 180;
@@ -61,7 +66,7 @@ function haversineM(a: [number, number], b: [number, number]) {
 
 export default function MapView() {
   const [hasMounted, setHasMounted] = useState(false);
-  const [stats, setStats] = useState<RideStats>(DEFAULT_STATS);
+  const [stats] = useState<RideStats>(DEFAULT_STATS);
   const [path, setPath] = useState<[number, number][]>([]);
   const [isUserPanned, setIsUserPanned] = useState(false);
   const mapRef = useRef<LeafletMap | null>(null);
@@ -71,22 +76,22 @@ export default function MapView() {
   const lastTimeRef = useRef<number | null>(null);
   const velocityRef = useRef<{ dLat: number; dLng: number }>({ dLat: 0, dLng: 0 });
 
-  // ultra-smooth springs
   const latSpring = useSpring(0, { stiffness: 25, damping: 25, mass: 2 });
   const lngSpring = useSpring(0, { stiffness: 25, damping: 25, mass: 2 });
 
   const [position, setPosition] = useState<[number, number] | null>(null);
   const tooltipRef = useRef<HTMLDivElement | null>(null);
 
-  // ---- GPS watch ----
+  // --- GPS watch with velocity tracking ---
   useEffect(() => {
     if (!hasMounted || typeof navigator === 'undefined') return;
+
     import('leaflet-defaulticon-compatibility').then(() =>
       import('leaflet-defaulticon-compatibility/dist/leaflet-defaulticon-compatibility.css')
     );
 
     const watch = navigator.geolocation.watchPosition(
-      pos => {
+      (pos) => {
         const now = Date.now();
         const coords: [number, number] = [pos.coords.latitude, pos.coords.longitude];
         const last = lastPosRef.current;
@@ -104,7 +109,7 @@ export default function MapView() {
         lastPosRef.current = coords;
         lastTimeRef.current = now;
         setPosition(coords);
-        setPath(p => [...p, coords]);
+        setPath((p) => [...p, coords]);
         latSpring.set(coords[0]);
         lngSpring.set(coords[1]);
 
@@ -112,13 +117,16 @@ export default function MapView() {
           mapRef.current.setView(coords, mapRef.current.getZoom(), { animate: true });
         }
       },
-      err => console.error(err),
+      (err) => console.error(err),
       { enableHighAccuracy: true, timeout: 15000, maximumAge: 0 }
     );
-    return () => navigator.geolocation.clearWatch(watch);
+
+    return () => {
+      navigator.geolocation.clearWatch(watch);
+    };
   }, [hasMounted, isUserPanned, latSpring, lngSpring]);
 
-  // ---- predictive loop ----
+  // --- Predictive motion loop ---
   useEffect(() => {
     if (!hasMounted) return;
     let raf: number;
@@ -132,22 +140,26 @@ export default function MapView() {
         const { dLat, dLng } = velocityRef.current;
         const predicted: [number, number] = [
           lastPos[0] + dLat * dt,
-          lastPos[1] + dLng * dt
+          lastPos[1] + dLng * dt,
         ];
-        velocityRef.current = { dLat: dLat * 0.995, dLng: dLng * 0.995 }; // slower decay
+        velocityRef.current = { dLat: dLat * 0.995, dLng: dLng * 0.995 };
         latSpring.set(predicted[0]);
         lngSpring.set(predicted[1]);
       }
       raf = requestAnimationFrame(loop);
     };
+
     raf = requestAnimationFrame(loop);
     return () => cancelAnimationFrame(raf);
   }, [hasMounted, latSpring, lngSpring]);
 
-  // ---- mount ----
-  useEffect(() => setHasMounted(true), []);
+  // --- Mount state ---
+  useEffect(() => {
+    setHasMounted(true);
+    return; // ✅ explicit void return
+  }, []);
 
-  // ---- recenter ----
+  // --- Recenter handler ---
   useEffect(() => {
     if (!hasMounted) return;
     const recenter = () => {
@@ -161,20 +173,26 @@ export default function MapView() {
     return () => window.removeEventListener('rydex-recenter', recenter);
   }, [hasMounted, position]);
 
-  // ---- manual pan detection ----
+  // --- Manual pan detection (build safe) ---
   useEffect(() => {
     if (!hasMounted) return;
     const map = mapRef.current;
     if (!map) return;
+
     const stopFollow = () => {
       followMarkerRef.current = false;
       setIsUserPanned(true);
     };
+
     map.on('dragstart', stopFollow);
-    return () => map.off('dragstart', stopFollow);
+
+    // ✅ explicit cleanup returning void
+    return () => {
+      map.off('dragstart', stopFollow);
+    };
   }, [hasMounted]);
 
-  // ---- tooltip follow ----
+  // --- Tooltip follow loop ---
   useEffect(() => {
     const map = mapRef.current;
     if (!map || !tooltipRef.current) return;
@@ -183,12 +201,14 @@ export default function MapView() {
       const lng = lngSpring.get();
       const pt = map.latLngToContainerPoint(L.latLng(lat, lng));
       const el = tooltipRef.current!;
-      el.style.transform = `translate(${pt.x - 40}px, ${pt.y - 60}px)`; // above dot
+      el.style.transform = `translate(${pt.x - 40}px, ${pt.y - 60}px)`;
       requestAnimationFrame(updateTooltip);
     };
     updateTooltip();
+    return; // ✅ void
   }, [latSpring, lngSpring]);
 
+  // --- Derived smooth position ---
   const smoothPos: [number, number] = [latSpring.get(), lngSpring.get()];
   if (!hasMounted || !smoothPos) {
     return (
@@ -204,7 +224,7 @@ export default function MapView() {
     return d.toISOString().substring(11, 19);
   };
 
-  // ---- render ----
+  // --- Render ---
   return (
     <div className="relative h-full w-full">
       <div className="absolute inset-0">
@@ -218,7 +238,7 @@ export default function MapView() {
           scrollWheelZoom
           dragging
         >
-          <MapRefBinder onReady={map => (mapRef.current = map)} />
+          <MapRefBinder onReady={(map) => (mapRef.current = map)} />
           <TileLayer
             attribution='&copy; <a href="https://carto.com/">CARTO</a>'
             url="https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png"
@@ -235,7 +255,7 @@ export default function MapView() {
               color: '#007bff',
               fillColor: '#007bff',
               fillOpacity: 0.9,
-              weight: 0
+              weight: 0,
             }}
           />
 
@@ -243,7 +263,7 @@ export default function MapView() {
         </MapContainer>
       </div>
 
-      {/* stable tooltip */}
+      {/* Stable tooltip following marker */}
       <div
         ref={tooltipRef}
         className="absolute pointer-events-none bg-white rounded-md shadow px-2 py-1 text-[10px] font-medium"
@@ -255,7 +275,7 @@ export default function MapView() {
           : stats.idle
           ? 'Idle'
           : 'Stopped'}
-        <div>{stats.phase === 'riding' && <>Ride Time {fmt(stats.rideSec)}</>}</div>
+        {stats.phase === 'riding' && <div>Ride Time {fmt(stats.rideSec)}</div>}
       </div>
 
       <RecenterButton visible={true} />
