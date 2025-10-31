@@ -6,14 +6,20 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "lint": "eslint"
+    "lint": "eslint",
+    "export": "next export"
   },
   "dependencies": {
+    "@capacitor-community/background-geolocation": "^1.2.26",
+    "@capacitor/android": "^7.4.4",
+    "@capacitor/cli": "^7.4.4",
+    "@capacitor/core": "^7.4.4",
     "@radix-ui/react-slot": "^1.2.3",
     "@supabase/supabase-js": "^2.76.1",
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
     "expo-haptics": "^15.0.7",
+    "framer-motion": "^11.0.0",
     "leaflet": "^1.9.4",
     "leaflet-defaulticon-compatibility": "^0.1.2",
     "lucide-react": "^0.548.0",
@@ -22,8 +28,7 @@
     "react-dom": "19.2.0",
     "react-leaflet": "^5.0.0",
     "tailwind-merge": "^3.3.1",
-    "tailwindcss-animate": "^1.0.7",
-    "framer-motion": "^11.0.0"
+    "tailwindcss-animate": "^1.0.7"
   },
   "devDependencies": {
     "@tailwindcss/postcss": "^4",
