@@ -31,6 +31,34 @@ function haversineM(a:[number,number],b:[number,number]){
   return 2*R*Math.atan2(Math.sqrt(s),Math.sqrt(1-s));
 }
 
+// ---- very small 2-D Kalman-like smoother ----
+class SimpleKalman {
+  pos:[number,number]; vel:[number,number];
+  processNoise:number; measureNoise:number;
+  constructor(lat:number,lng:number){
+    this.pos=[lat,lng]; this.vel=[0,0];
+    this.processNoise=0.00005;
+    this.measureNoise=0.001;
+  }
+  update(lat:number,lng:number,dt:number){
+    // predict
+    this.pos[0]+=this.vel[0]*dt;
+    this.pos[1]+=this.vel[1]*dt;
+    // correction gain
+    const k= this.processNoise/(this.processNoise+this.measureNoise);
+    // update velocity (difference quotient)
+    const newVel:[number,number]=[(lat-this.pos[0])/dt,(lng-this.pos[1])/dt];
+    this.vel[0]=this.vel[0]*(1-k)+newVel[0]*k;
+    this.vel[1]=this.vel[1]*(1-k)+newVel[1]*k;
+    // update position
+    this.pos[0]+=k*(lat-this.pos[0]);
+    this.pos[1]+=k*(lng-this.pos[1]);
+  }
+  predict(dt:number){
+    return [this.pos[0]+this.vel[0]*dt,this.pos[1]+this.vel[1]*dt] as [number,number];
+  }
+}
+
 export default function MapView(){
   const [hasMounted,setHasMounted]=useState(false);
   const [path,setPath]=useState<[number,number][]>([]);
@@ -39,36 +67,34 @@ export default function MapView(){
   const mapRef=useRef<LeafletMap|null>(null);
   const followMarkerRef=useRef(true);
 
-  // animation state
-  const animStart=useRef<number>(0);
-  const prevFix=useRef<[number,number]|null>(null);
-  const nextFix=useRef<[number,number]|null>(null);
+  const kalmanRef=useRef<SimpleKalman|null>(null);
+  const lastFixTime=useRef<number|null>(null);
+  const lastFix=useRef<[number,number]|null>(null);
   const currentPos=useRef<[number,number]|null>(null);
 
   // ---- map ready ----
-  const handleMapReady=(map:LeafletMap)=>{
-    mapRef.current=map;
-  };
+  const handleMapReady=(map:LeafletMap)=>{ mapRef.current=map; };
 
   // ---- GPS watch ----
   useEffect(()=>{
     if(!hasMounted||typeof navigator==='undefined') return undefined;
-
     import('leaflet-defaulticon-compatibility').then(()=>import('leaflet-defaulticon-compatibility/dist/leaflet-defaulticon-compatibility.css'));
 
     const watch=navigator.geolocation.watchPosition(
       pos=>{
         const coords:[number,number]=[pos.coords.latitude,pos.coords.longitude];
         const now=Date.now();
-
-        // push to path (true GPS)
+        if(!kalmanRef.current){
+          kalmanRef.current=new SimpleKalman(coords[0],coords[1]);
+          lastFix.current=coords;
+          lastFixTime.current=now;
+          return;
+        }
+        const dt=(now-(lastFixTime.current??now))/1000;
+        lastFixTime.current=now;
+        lastFix.current=coords;
+        kalmanRef.current.update(coords[0],coords[1],dt);
         setPath(p=>[...p,coords]);
-
-        // shift animation window
-        prevFix.current = nextFix.current ?? coords;
-        nextFix.current = coords;
-        animStart.current = now;
-
         if(followMarkerRef.current&&mapRef.current&&!isUserPanned){
           mapRef.current.setView(coords,mapRef.current.getZoom(),{animate:true});
         }
@@ -76,25 +102,20 @@ export default function MapView(){
       err=>console.error(err),
       {enableHighAccuracy:true,timeout:15000,maximumAge:0}
     );
-
     return()=>navigator.geolocation.clearWatch(watch);
   },[hasMounted,isUserPanned]);
 
-  // ---- animate blue dot between true fixes ----
+  // ---- animation loop (prediction + 0.5 s lag) ----
   useEffect(()=>{
     if(!hasMounted) return undefined;
     let raf:number;
-    const DURATION=1000; // assume GPS about 1 Hz
-
+    const LAG=500; // ms
     const loop=()=>{
-      const a=prevFix.current,b=nextFix.current;
-      if(a&&b){
-        const t=Math.min((Date.now()-animStart.current)/DURATION,1);
-        const lat=a[0]+(b[0]-a[0])*t;
-        const lng=a[1]+(b[1]-a[1])*t;
-        currentPos.current=[lat,lng];
-      }else if(b){
-        currentPos.current=b;
+      const kf=kalmanRef.current;
+      if(kf&&lastFixTime.current){
+        const dt=(Date.now()-(lastFixTime.current+LAG))/1000;
+        const pred=kf.predict(dt);
+        currentPos.current=pred;
       }
       raf=requestAnimationFrame(loop);
     };
@@ -110,10 +131,7 @@ export default function MapView(){
     if(!hasMounted) return undefined;
     const map=mapRef.current;
     if(!map) return undefined;
-    const stopFollow=()=>{
-      followMarkerRef.current=false;
-      setIsUserPanned(true);
-    };
+    const stopFollow=()=>{followMarkerRef.current=false;setIsUserPanned(true);};
     map.on('dragstart',stopFollow);
     return()=>map.off('dragstart',stopFollow);
   },[hasMounted]);
@@ -149,7 +167,6 @@ export default function MapView(){
           {path.length>1 && (
             <Polyline positions={path} pathOptions={{color:'#007bff',weight:4,opacity:0.9}}/>
           )}
-          {/* solid blue dot following real path */}
           {currentPos.current && (
             <Circle
               center={currentPos.current}
