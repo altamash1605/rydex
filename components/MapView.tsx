@@ -7,7 +7,7 @@ import type { Map as LeafletMap } from 'leaflet';
 import 'leaflet/dist/leaflet.css';
 import RecenterButton from '@/components/RecenterButton';
 
-// --- Dynamic imports (client-only Leaflet components) ---
+// --- Dynamic Leaflet imports ---
 const MapContainer = dynamic(() => import('react-leaflet').then((m) => m.MapContainer), { ssr: false });
 const TileLayer = dynamic(() => import('react-leaflet').then((m) => m.TileLayer), { ssr: false });
 const Marker = dynamic(() => import('react-leaflet').then((m) => m.Marker), { ssr: false });
@@ -27,7 +27,7 @@ const MapRefBinder = dynamic(() =>
   }))
 );
 
-// --- Types ---
+// --- Ride stats type ---
 type RideStats = {
   phase?: 'idle' | 'toPickup' | 'riding';
   active?: boolean;
@@ -52,7 +52,7 @@ const DEFAULT_STATS: RideStats = {
   avgSpeedKmh: 0,
 };
 
-// --- Helpers ---
+// --- Helper: Haversine distance ---
 function haversineM(a: [number, number], b: [number, number]) {
   const R = 6371000;
   const toRad = (d: number) => (d * Math.PI) / 180;
@@ -74,16 +74,19 @@ export default function MapView() {
   const [isUserPanned, setIsUserPanned] = useState(false);
   const mapRef = useRef<LeafletMap | null>(null);
   const followMarkerRef = useRef(true);
+
+  // GPS tracking
   const lastPosRef = useRef<[number, number] | null>(null);
   const lastTimeRef = useRef<number | null>(null);
+  const velocityRef = useRef<{ dLat: number; dLng: number }>({ dLat: 0, dLng: 0 }); // degrees/sec
 
-  // --- Smooth motion springs ---
-  const latSpring = useSpring(0, { stiffness: 60, damping: 15 });
-  const lngSpring = useSpring(0, { stiffness: 60, damping: 15 });
+  // Framer Motion springs for smooth animation
+  const latSpring = useSpring(0, { stiffness: 70, damping: 15 });
+  const lngSpring = useSpring(0, { stiffness: 70, damping: 15 });
 
   const [position, setPosition] = useState<[number, number] | null>(null);
 
-  // --- GPS Watch with adaptive filtering ---
+  // --- GPS watch with predictive velocity tracking ---
   useEffect(() => {
     if (!hasMounted || typeof navigator === 'undefined') return;
 
@@ -93,36 +96,31 @@ export default function MapView() {
 
     const watch = navigator.geolocation.watchPosition(
       (pos) => {
-        const coords: [number, number] = [pos.coords.latitude, pos.coords.longitude];
         const now = Date.now();
-
+        const coords: [number, number] = [pos.coords.latitude, pos.coords.longitude];
         const last = lastPosRef.current;
         const lastTime = lastTimeRef.current;
-        const dt = lastTime ? (now - lastTime) / 1000 : 1; // seconds
 
-        if (last) {
-          const dist = haversineM(last, coords); // meters
-          const speed = dist / dt; // m/s
+        if (last && lastTime) {
+          const dt = (now - lastTime) / 1000; // seconds
+          const dist = haversineM(last, coords);
+          if (dist < 3 || dt === 0) return; // ignore small noise
 
-          // Ignore tiny jitter
-          if (dist < 3) return;
-
-          // 🚀 Adaptive filtering — skip updates if moving fast
-          if (speed > 10 && dt < 3) return; // >36 km/h, only once every 3s
-          if (speed > 3 && dt < 1.5) return; // 10–36 km/h, every 1.5s
+          // compute velocity (deg/sec)
+          const dLat = (coords[0] - last[0]) / dt;
+          const dLng = (coords[1] - last[1]) / dt;
+          velocityRef.current = { dLat, dLng };
         }
 
-        // Store current for next cycle
         lastPosRef.current = coords;
         lastTimeRef.current = now;
-
-        // Update position and springs
         setPosition(coords);
         setPath((p) => [...p, coords]);
+
+        // Update springs immediately to start following
         latSpring.set(coords[0]);
         lngSpring.set(coords[1]);
 
-        // Auto-follow
         if (followMarkerRef.current && mapRef.current && !isUserPanned) {
           mapRef.current.setView(coords, mapRef.current.getZoom(), { animate: true });
         }
@@ -136,7 +134,46 @@ export default function MapView() {
     };
   }, [hasMounted, isUserPanned, latSpring, lngSpring]);
 
-  // --- Compute smoothed position from springs ---
+  // --- Continuous predictive motion loop ---
+  useEffect(() => {
+    if (!hasMounted) return;
+    let animationFrame: number | null = null;
+    let lastFrame = performance.now();
+
+    const loop = (time: number) => {
+      const dt = (time - lastFrame) / 1000;
+      lastFrame = time;
+
+      const lastPos = lastPosRef.current;
+      if (lastPos) {
+        // Predict forward position based on velocity
+        const { dLat, dLng } = velocityRef.current;
+        const predicted: [number, number] = [
+          lastPos[0] + dLat * dt,
+          lastPos[1] + dLng * dt,
+        ];
+
+        // Apply small damping to velocity for realism
+        velocityRef.current = {
+          dLat: dLat * 0.98,
+          dLng: dLng * 0.98,
+        };
+
+        // Update springs continuously
+        latSpring.set(predicted[0]);
+        lngSpring.set(predicted[1]);
+      }
+
+      animationFrame = requestAnimationFrame(loop);
+    };
+
+    animationFrame = requestAnimationFrame(loop);
+    return () => {
+      if (animationFrame) cancelAnimationFrame(animationFrame);
+    };
+  }, [hasMounted, latSpring, lngSpring]);
+
+  // --- Compute smoothed position ---
   const smoothLat = latSpring.get();
   const smoothLng = lngSpring.get();
   const smoothPosition: [number, number] | null =
@@ -156,9 +193,7 @@ export default function MapView() {
       }
     };
     window.addEventListener('rydex-recenter', handleRecenter);
-    return () => {
-      window.removeEventListener('rydex-recenter', handleRecenter);
-    };
+    return () => window.removeEventListener('rydex-recenter', handleRecenter);
   }, [hasMounted, position]);
 
   // --- Detect manual panning (build-safe) ---
@@ -218,7 +253,7 @@ export default function MapView() {
             <Polyline positions={path} pathOptions={{ color: '#808080', weight: 4, opacity: 0.9 }} />
           )}
 
-          {/* Blue location dot */}
+          {/* Blue dot marker */}
           <Circle
             center={smoothPosition}
             radius={6}
