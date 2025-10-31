@@ -2,11 +2,11 @@
 
 import dynamic from 'next/dynamic';
 import { useEffect, useRef, useState } from 'react';
+import { useSpring } from 'framer-motion';
 import type { Map as LeafletMap } from 'leaflet';
 import 'leaflet/dist/leaflet.css';
 import RecenterButton from '@/components/RecenterButton';
 
-// Dynamic imports (client-only)
 const MapContainer = dynamic(() => import('react-leaflet').then((m) => m.MapContainer), { ssr: false });
 const TileLayer = dynamic(() => import('react-leaflet').then((m) => m.TileLayer), { ssr: false });
 const Marker = dynamic(() => import('react-leaflet').then((m) => m.Marker), { ssr: false });
@@ -14,7 +14,6 @@ const Tooltip = dynamic(() => import('react-leaflet').then((m) => m.Tooltip), { 
 const Polyline = dynamic(() => import('react-leaflet').then((m) => m.Polyline), { ssr: false });
 const Circle = dynamic(() => import('react-leaflet').then((m) => m.Circle), { ssr: false });
 
-// ✅ Safe map binder for dynamic import
 const MapRefBinder = dynamic(() =>
   import('react-leaflet').then((m) => ({
     default: function MapRefBinder({ onReady }: { onReady: (map: LeafletMap) => void }) {
@@ -51,7 +50,6 @@ const DEFAULT_STATS: RideStats = {
   avgSpeedKmh: 0,
 };
 
-// --- helper ---
 function haversineM(a: [number, number], b: [number, number]) {
   const R = 6371000;
   const toRad = (d: number) => (d * Math.PI) / 180;
@@ -67,59 +65,20 @@ function haversineM(a: [number, number], b: [number, number]) {
 
 export default function MapView() {
   const [hasMounted, setHasMounted] = useState(false);
-  const [position, setPosition] = useState<[number, number] | null>(null);
-  const [targetPos, setTargetPos] = useState<[number, number] | null>(null);
   const [stats, setStats] = useState<RideStats>(DEFAULT_STATS);
   const [path, setPath] = useState<[number, number][]>([]);
   const [isUserPanned, setIsUserPanned] = useState(false);
-
   const mapRef = useRef<LeafletMap | null>(null);
   const followMarkerRef = useRef(true);
-  const lastPositionRef = useRef<[number, number] | null>(null);
-  const animRef = useRef<number | null>(null);
+  const lastPosRef = useRef<[number, number] | null>(null);
 
-  const lerp = (a: number, b: number, t: number) => a + (b - a) * t;
+  // Springs for latitude and longitude
+  const latSpring = useSpring(0, { stiffness: 60, damping: 15 });
+  const lngSpring = useSpring(0, { stiffness: 60, damping: 15 });
 
-  // ✅ Smooth marker glide animation (easeOutCubic + distance-based)
-  useEffect(() => {
-    let startTime: number | null = null;
+  const [position, setPosition] = useState<[number, number] | null>(null);
 
-    const animate = (time: number) => {
-      if (!position || !targetPos) return;
-
-      const dist = haversineM(position, targetPos);
-      const duration = Math.min(2000, Math.max(300, dist * 20)); // adaptive duration
-      if (startTime === null) startTime = time;
-
-      const linearT = Math.min((time - startTime) / duration, 1);
-      const t = 1 - Math.pow(1 - linearT, 3); // easeOutCubic easing
-
-      const newLat = lerp(position[0], targetPos[0], t);
-      const newLng = lerp(position[1], targetPos[1], t);
-      const newPos: [number, number] = [newLat, newLng];
-      setPosition(newPos);
-
-      if (followMarkerRef.current && mapRef.current && !isUserPanned) {
-        mapRef.current.panTo(newPos, { animate: false });
-      }
-
-      if (linearT < 1) {
-        animRef.current = requestAnimationFrame(animate);
-      } else {
-        animRef.current = null;
-      }
-    };
-
-    if (targetPos && position && !animRef.current) {
-      animRef.current = requestAnimationFrame(animate);
-    }
-
-    return () => {
-      if (animRef.current) cancelAnimationFrame(animRef.current);
-    };
-  }, [targetPos]);
-
-  // --- Geolocation watch + movement filter ---
+  // Update springs when new GPS arrives
   useEffect(() => {
     if (!hasMounted || typeof navigator === 'undefined') return;
 
@@ -130,13 +89,15 @@ export default function MapView() {
     const watch = navigator.geolocation.watchPosition(
       (pos) => {
         const coords: [number, number] = [pos.coords.latitude, pos.coords.longitude];
-        const last = lastPositionRef.current;
-        if (last && haversineM(last, coords) < 3) return;
-
-        lastPositionRef.current = coords;
-        if (!position) setPosition(coords);
-        setTargetPos(coords);
+        const last = lastPosRef.current;
+        if (last && haversineM(last, coords) < 3) return; // ignore small jitter
+        lastPosRef.current = coords;
+        setPosition(coords);
         setPath((p) => [...p, coords]);
+
+        // Move springs
+        latSpring.set(coords[0]);
+        lngSpring.set(coords[1]);
 
         if (followMarkerRef.current && mapRef.current && !isUserPanned) {
           mapRef.current.setView(coords, mapRef.current.getZoom(), { animate: true });
@@ -149,12 +110,15 @@ export default function MapView() {
     return () => navigator.geolocation.clearWatch(watch);
   }, [hasMounted, isUserPanned]);
 
-  // --- Client mount ---
-  useEffect(() => {
-    setHasMounted(true);
-  }, []);
+  // Compute smooth position from springs
+  const smoothLat = latSpring.get();
+  const smoothLng = lngSpring.get();
+  const smoothPosition: [number, number] | null =
+    position ? [smoothLat, smoothLng] : null;
 
-  // --- Recenter button handler ---
+  useEffect(() => setHasMounted(true), []);
+
+  // Recenter button handler
   useEffect(() => {
     if (!hasMounted) return;
     const handleRecenter = () => {
@@ -168,26 +132,20 @@ export default function MapView() {
     return () => window.removeEventListener('rydex-recenter', handleRecenter);
   }, [hasMounted, position]);
 
-  // --- Detect manual panning (build-safe) ---
+  // Detect manual panning
   useEffect(() => {
     if (!hasMounted) return;
     const map = mapRef.current;
     if (!map) return;
-
     const stopFollowing = () => {
       followMarkerRef.current = false;
       setIsUserPanned(true);
     };
-
     map.on('dragstart', stopFollowing);
-
-    return () => {
-      map.off('dragstart', stopFollowing);
-    };
+    return () => map.off('dragstart', stopFollowing);
   }, [hasMounted]);
 
-  if (!hasMounted) return null;
-  if (!position)
+  if (!hasMounted || !smoothPosition)
     return (
       <div className="flex items-center justify-center h-full w-full bg-gray-100">
         <p className="text-gray-600">Fetching location...</p>
@@ -204,7 +162,7 @@ export default function MapView() {
     <div className="relative h-full w-full z-0">
       <div className="absolute inset-0 z-0">
         <MapContainer
-          center={position}
+          center={smoothPosition}
           zoom={15}
           zoomControl={false}
           attributionControl={false}
@@ -229,7 +187,7 @@ export default function MapView() {
 
           {/* 🔵 Fixed blue location dot */}
           <Circle
-            center={position}
+            center={smoothPosition}
             radius={6}
             pathOptions={{
               color: '#007bff',
@@ -240,7 +198,7 @@ export default function MapView() {
           />
 
           {/* 📍 Marker tooltip */}
-          <Marker position={position}>
+          <Marker position={smoothPosition}>
             <Tooltip permanent direction="top" offset={[0, -10]}>
               <div className="text-xs">
                 <div className="font-semibold mb-1">
@@ -265,7 +223,6 @@ export default function MapView() {
         </MapContainer>
       </div>
 
-      {/* ✅ external recenter button */}
       <RecenterButton visible={true} />
     </div>
   );
