@@ -37,14 +37,25 @@ const DEFAULT_STATS: RideStats = {
   avgSpeedKmh: 0,
 };
 
-// ✅ helper to bind live map instance to ref
+// --- helpers ---
+function haversineM(a: [number, number], b: [number, number]) {
+  const R = 6371000;
+  const toRad = (d: number) => (d * Math.PI) / 180;
+  const dLat = toRad(b[0] - a[0]);
+  const dLng = toRad(b[1] - a[1]);
+  const lat1 = toRad(a[0]);
+  const lat2 = toRad(b[0]);
+  const s =
+    Math.sin(dLat / 2) ** 2 +
+    Math.cos(lat1) * Math.cos(lat2) * Math.sin(dLng / 2) ** 2;
+  return 2 * R * Math.atan2(Math.sqrt(s), Math.sqrt(1 - s));
+}
+
+// ✅ binds live map instance
 function MapRefBinder({ onReady }: { onReady: (map: LeafletMap) => void }) {
   const map = useMapEvents({});
   useEffect(() => {
-    if (map) {
-      onReady(map);
-      console.log('✅ MapRefBinder attached map:', map);
-    }
+    if (map) onReady(map);
   }, [map, onReady]);
   return null;
 }
@@ -57,12 +68,13 @@ export default function MapView() {
   const [isUserPanned, setIsUserPanned] = useState(false);
   const mapRef = useRef<LeafletMap | null>(null);
   const animRef = useRef<number | null>(null);
+  const followMarkerRef = useRef(true);
+  const lastPositionRef = useRef<[number, number] | null>(null);
 
-  const lerp = (start: [number, number], end: [number, number], t: number) => [
-    start[0] + (end[0] - start[0]) * t,
-    start[1] + (end[1] - start[1]) * t,
-  ] as [number, number];
+  const lerp = (start: [number, number], end: [number, number], t: number) =>
+    [start[0] + (end[0] - start[0]) * t, start[1] + (end[1] - start[1]) * t] as [number, number];
 
+  // --- Smooth marker animation ---
   useEffect(() => {
     let startTime: number | null = null;
     const duration = 1000;
@@ -75,16 +87,12 @@ export default function MapView() {
       const newPos = lerp(position, targetPos, t);
       setPosition(newPos);
 
-      if (mapRef.current && !isUserPanned) {
+      if (mapRef.current && followMarkerRef.current && !isUserPanned) {
         mapRef.current.panTo(newPos, { animate: false });
       }
 
-      if (t < 1) {
-        animRef.current = requestAnimationFrame(animate);
-      } else {
-        animRef.current = null;
-        startTime = null;
-      }
+      if (t < 1) animRef.current = requestAnimationFrame(animate);
+      else animRef.current = null;
     };
 
     if (targetPos && position && !animRef.current) {
@@ -96,26 +104,35 @@ export default function MapView() {
     };
   }, [targetPos, isUserPanned]);
 
+  // --- Geolocation watch + movement filter ---
   useEffect(() => {
-    import('leaflet-defaulticon-compatibility').then(() => {
-      import('leaflet-defaulticon-compatibility/dist/leaflet-defaulticon-compatibility.css');
-    });
+    import('leaflet-defaulticon-compatibility').then(() =>
+      import('leaflet-defaulticon-compatibility/dist/leaflet-defaulticon-compatibility.css')
+    );
 
-    if (navigator.geolocation) {
-      const watch = navigator.geolocation.watchPosition(
-        (pos) => {
-          const newPos: [number, number] = [pos.coords.latitude, pos.coords.longitude];
-          if (!position) setPosition(newPos);
-          setTargetPos(newPos);
-          setPath((prev) => [...prev, newPos]);
-        },
-        (err) => console.error(err),
-        { enableHighAccuracy: true, timeout: 15000, maximumAge: 0 }
-      );
-      return () => navigator.geolocation.clearWatch(watch);
-    }
-  }, []);
+    if (!navigator.geolocation) return;
 
+    const watch = navigator.geolocation.watchPosition(
+      (pos) => {
+        const coords: [number, number] = [pos.coords.latitude, pos.coords.longitude];
+        const last = lastPositionRef.current;
+
+        // 🚫 Ignore tiny movements
+        if (last && haversineM(last, coords) < 3) return;
+
+        lastPositionRef.current = coords;
+        if (!position) setPosition(coords);
+        setTargetPos(coords);
+        setPath((prev) => [...prev, coords]);
+      },
+      (err) => console.error(err),
+      { enableHighAccuracy: true, timeout: 15000, maximumAge: 0 }
+    );
+
+    return () => navigator.geolocation.clearWatch(watch);
+  }, [position]);
+
+  // --- Listen for ride stats updates ---
   useEffect(() => {
     const onStats = (e: Event) => {
       const ce = e as CustomEvent<RideStats>;
@@ -125,6 +142,7 @@ export default function MapView() {
     return () => window.removeEventListener('rydex-ride-stats', onStats as EventListener);
   }, []);
 
+  // --- Listen for external path append events ---
   useEffect(() => {
     const onAppend = (e: Event) => {
       const ce = e as CustomEvent<[number, number]>;
@@ -133,6 +151,34 @@ export default function MapView() {
     window.addEventListener('rydex-path-append', onAppend as EventListener);
     return () => window.removeEventListener('rydex-path-append', onAppend as EventListener);
   }, []);
+
+  // --- Listen for RecenterButton event ---
+  useEffect(() => {
+    const handleRecenter = () => {
+      console.log('📍 Recenter event received');
+      followMarkerRef.current = true;
+      setIsUserPanned(false);
+      if (mapRef.current && position) {
+        mapRef.current.flyTo(position, mapRef.current.getZoom(), { animate: true, duration: 0.8 });
+      }
+    };
+    window.addEventListener('rydex-recenter', handleRecenter);
+    return () => window.removeEventListener('rydex-recenter', handleRecenter);
+  }, [position]);
+
+  // --- Detect manual panning ---
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map) return;
+    const stopFollowing = () => {
+      followMarkerRef.current = false;
+      setIsUserPanned(true);
+    };
+    map.on('dragstart', stopFollowing);
+    return () => {
+      map.off('dragstart', stopFollowing);
+    };
+  }, [mapRef.current]);
 
   if (!position) {
     return (
@@ -146,28 +192,6 @@ export default function MapView() {
     if (!s || isNaN(s)) return '00:00:00';
     const date = new Date(s * 1000);
     return date.toISOString().substring(11, 19);
-  };
-
-  const handleRecenter = () => {
-    console.log('🎯 Recenter clicked');
-    const map = mapRef.current;
-    const pos = position;
-
-    if (!map) {
-      console.warn('⚠️ Map reference is null');
-      return;
-    }
-
-    if (!pos) {
-      console.warn('⚠️ Position is null');
-      return;
-    }
-
-    map.invalidateSize();
-    map.flyTo(pos, map.getZoom(), { animate: true, duration: 0.8 });
-
-    console.log('✅ Map recentred to:', pos);
-    setIsUserPanned(false);
   };
 
   return (
@@ -185,7 +209,6 @@ export default function MapView() {
           dragging
           touchZoom
         >
-          {/* 👇 ensures mapRef is always set */}
           <MapRefBinder onReady={(map) => (mapRef.current = map)} />
 
           <TileLayer
@@ -209,15 +232,12 @@ export default function MapView() {
                     ? 'Idle'
                     : 'Stopped'}
                 </div>
-
                 {stats.phase === 'toPickup' && <div>Pickup Time {fmt(stats.pickupSec)}</div>}
                 {stats.phase === 'riding' && <div>Ride Time {fmt(stats.rideSec)}</div>}
-
                 <div>Dist {(stats.distanceM / 1000).toFixed(2)} km</div>
                 {typeof stats.avgSpeedKmh === 'number' && (
                   <div>Avg {stats.avgSpeedKmh.toFixed(1)} km/h</div>
                 )}
-
                 {stats.phase === 'idle' && <div>Idle for {stats.idleSec}s</div>}
               </div>
             </Tooltip>
@@ -226,7 +246,7 @@ export default function MapView() {
       </div>
 
       {/* ✅ external recenter button */}
-      <RecenterButton onClick={handleRecenter} visible={true} />
+      <RecenterButton visible={true} />
     </div>
   );
 }
