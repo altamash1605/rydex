@@ -17,11 +17,10 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: 20
-
-      - name: Install dependencies and build web app
-        run: |
-          npm ci
-          npm run build
+- name: Install dependencies and build web app
+  run: |
+    npm install
+    npm run build
 
       - name: Install Capacitor
         run: npm install @capacitor/core @capacitor/cli @capacitor/android
