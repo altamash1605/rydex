@@ -8,7 +8,7 @@ import L from 'leaflet';
 import 'leaflet/dist/leaflet.css';
 import RecenterButton from '@/components/RecenterButton';
 
-// --- dynamic leaflet pieces ---
+// ---- dynamic leaflet pieces ----
 const MapContainer = dynamic(() => import('react-leaflet').then(m => m.MapContainer), { ssr: false });
 const TileLayer = dynamic(() => import('react-leaflet').then(m => m.TileLayer), { ssr: false });
 const Polyline = dynamic(() => import('react-leaflet').then(m => m.Polyline), { ssr: false });
@@ -19,13 +19,14 @@ const MapRefBinder = dynamic(() =>
       const map = m.useMapEvents({});
       useEffect(() => {
         if (map) onReady(map);
+        return;
       }, [map, onReady]);
       return null;
     }
   }))
 );
 
-// --- helper: distance in meters ---
+// ---- helper ----
 function haversineM(a: [number, number], b: [number, number]) {
   const R = 6371000;
   const toRad = (d: number) => (d * Math.PI) / 180;
@@ -43,22 +44,22 @@ export default function MapView() {
   const [hasMounted, setHasMounted] = useState(false);
   const [path, setPath] = useState<[number, number][]>([]);
   const [isUserPanned, setIsUserPanned] = useState(false);
+
   const mapRef = useRef<LeafletMap | null>(null);
   const markerRef = useRef<L.Marker | null>(null);
   const tooltipRef = useRef<HTMLDivElement | null>(null);
-
   const followMarkerRef = useRef(true);
+
   const lastPosRef = useRef<[number, number] | null>(null);
   const lastTimeRef = useRef<number | null>(null);
   const velocityRef = useRef<{ dLat: number; dLng: number }>({ dLat: 0, dLng: 0 });
 
-  // --- smooth framer springs ---
   const latSpring = useSpring(0, { stiffness: 35, damping: 25, mass: 1.8 });
   const lngSpring = useSpring(0, { stiffness: 35, damping: 25, mass: 1.8 });
 
   const [position, setPosition] = useState<[number, number] | null>(null);
 
-  // ---- create persistent marker once map ready ----
+  // ---- create marker once map ready ----
   const handleMapReady = (map: LeafletMap) => {
     mapRef.current = map;
     if (!markerRef.current) {
@@ -116,7 +117,7 @@ export default function MapView() {
     return () => navigator.geolocation.clearWatch(watch);
   }, [hasMounted, isUserPanned, latSpring, lngSpring]);
 
-  // ---- predictive motion loop (drives marker + map center) ----
+  // ---- predictive loop updating marker ----
   useEffect(() => {
     if (!hasMounted) return;
     let raf: number;
@@ -125,6 +126,7 @@ export default function MapView() {
     const loop = (t: number) => {
       const dt = (t - last) / 1000;
       last = t;
+
       const lastPos = lastPosRef.current;
       if (lastPos) {
         const { dLat, dLng } = velocityRef.current;
@@ -139,11 +141,11 @@ export default function MapView() {
 
       const lat = latSpring.get();
       const lng = lngSpring.get();
-      if (markerRef.current) {
-        markerRef.current.setLatLng([lat, lng]);
-      }
 
-      // update tooltip position if present
+      // move marker directly
+      if (markerRef.current) markerRef.current.setLatLng([lat, lng]);
+
+      // move tooltip
       if (tooltipRef.current && mapRef.current) {
         const pt = mapRef.current.latLngToContainerPoint(L.latLng(lat, lng));
         tooltipRef.current.style.transform = `translate(${pt.x - 40}px, ${pt.y - 60}px)`;
@@ -161,17 +163,21 @@ export default function MapView() {
     setHasMounted(true);
   }, []);
 
-  // ---- manual pan detection ----
-  useEffect(() => {
+  // ---- manual pan detection (build-safe) ----
+  useEffect((): void => {
     if (!hasMounted) return;
     const map = mapRef.current;
     if (!map) return;
+
     const stopFollow = () => {
       followMarkerRef.current = false;
       setIsUserPanned(true);
     };
+
     map.on('dragstart', stopFollow);
-    return () => map.off('dragstart', stopFollow);
+    return () => {
+      map.off('dragstart', stopFollow);
+    };
   }, [hasMounted]);
 
   if (!hasMounted)
@@ -218,7 +224,7 @@ export default function MapView() {
         </MapContainer>
       </div>
 
-      {/* tooltip attached to marker */}
+      {/* tooltip above marker */}
       <div
         ref={tooltipRef}
         className="absolute pointer-events-none bg-white rounded-md shadow px-2 py-1 text-[10px] font-medium"
