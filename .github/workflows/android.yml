@@ -1,9 +1,9 @@
 name: Build Android APK
 
 on:
-  workflow_dispatch:       # allows you to trigger manually
+  workflow_dispatch:
   push:
-    branches: [ main ]     # optional: builds when you push to main
+    branches: [ main ]
 
 jobs:
   build:
@@ -17,10 +17,11 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: 20
-- name: Install dependencies and build web app
-  run: |
-    npm install
-    npm run build
+
+      - name: Install dependencies and build web app
+        run: |
+          npm install
+          npm run build
 
       - name: Install Capacitor
         run: npm install @capacitor/core @capacitor/cli @capacitor/android
@@ -34,7 +35,6 @@ jobs:
           distribution: temurin
           java-version: 17
 
-
       - name: Setup Android SDK
         uses: android-actions/setup-android@v3
 
@@ -47,3 +47,4 @@ jobs:
         with:
           name: Rydex-debug-apk
           path: android/app/build/outputs/apk/debug/*.apk
+
