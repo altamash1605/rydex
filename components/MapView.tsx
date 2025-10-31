@@ -50,6 +50,7 @@ const DEFAULT_STATS: RideStats = {
   avgSpeedKmh: 0,
 };
 
+// --- helpers ---
 function haversineM(a: [number, number], b: [number, number]) {
   const R = 6371000;
   const toRad = (d: number) => (d * Math.PI) / 180;
@@ -72,13 +73,13 @@ export default function MapView() {
   const followMarkerRef = useRef(true);
   const lastPosRef = useRef<[number, number] | null>(null);
 
-  // Springs for latitude and longitude
+  // --- smooth springs for lat/lng ---
   const latSpring = useSpring(0, { stiffness: 60, damping: 15 });
   const lngSpring = useSpring(0, { stiffness: 60, damping: 15 });
 
   const [position, setPosition] = useState<[number, number] | null>(null);
 
-  // Update springs when new GPS arrives
+  // --- watch GPS ---
   useEffect(() => {
     if (!hasMounted || typeof navigator === 'undefined') return;
 
@@ -90,12 +91,12 @@ export default function MapView() {
       (pos) => {
         const coords: [number, number] = [pos.coords.latitude, pos.coords.longitude];
         const last = lastPosRef.current;
-        if (last && haversineM(last, coords) < 3) return; // ignore small jitter
+        if (last && haversineM(last, coords) < 3) return; // ignore tiny jitter
         lastPosRef.current = coords;
         setPosition(coords);
         setPath((p) => [...p, coords]);
 
-        // Move springs
+        // move springs
         latSpring.set(coords[0]);
         lngSpring.set(coords[1]);
 
@@ -107,10 +108,12 @@ export default function MapView() {
       { enableHighAccuracy: true, timeout: 15000, maximumAge: 0 }
     );
 
-    return () => navigator.geolocation.clearWatch(watch);
-  }, [hasMounted, isUserPanned]);
+    return () => {
+      navigator.geolocation.clearWatch(watch);
+    };
+  }, [hasMounted, isUserPanned, latSpring, lngSpring]);
 
-  // Compute smooth position from springs
+  // --- compute smoothed position ---
   const smoothLat = latSpring.get();
   const smoothLng = lngSpring.get();
   const smoothPosition: [number, number] | null =
@@ -118,7 +121,7 @@ export default function MapView() {
 
   useEffect(() => setHasMounted(true), []);
 
-  // Recenter button handler
+  // --- recenter handler ---
   useEffect(() => {
     if (!hasMounted) return;
     const handleRecenter = () => {
@@ -129,20 +132,28 @@ export default function MapView() {
       }
     };
     window.addEventListener('rydex-recenter', handleRecenter);
-    return () => window.removeEventListener('rydex-recenter', handleRecenter);
+    return () => {
+      window.removeEventListener('rydex-recenter', handleRecenter);
+    };
   }, [hasMounted, position]);
 
-  // Detect manual panning
+  // --- detect manual panning (build-safe) ---
   useEffect(() => {
     if (!hasMounted) return;
     const map = mapRef.current;
     if (!map) return;
+
     const stopFollowing = () => {
       followMarkerRef.current = false;
       setIsUserPanned(true);
     };
+
     map.on('dragstart', stopFollowing);
-    return () => map.off('dragstart', stopFollowing);
+
+    // ✅ explicit cleanup, returns void
+    return () => {
+      map.off('dragstart', stopFollowing);
+    };
   }, [hasMounted]);
 
   if (!hasMounted || !smoothPosition)
@@ -158,6 +169,7 @@ export default function MapView() {
     return date.toISOString().substring(11, 19);
   };
 
+  // --- render ---
   return (
     <div className="relative h-full w-full z-0">
       <div className="absolute inset-0 z-0">
@@ -180,12 +192,12 @@ export default function MapView() {
             url="https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png"
           />
 
-          {/* 🛣️ Path line */}
+          {/* path line */}
           {path.length > 1 && (
             <Polyline positions={path} pathOptions={{ color: '#808080', weight: 4, opacity: 0.9 }} />
           )}
 
-          {/* 🔵 Fixed blue location dot */}
+          {/* blue dot */}
           <Circle
             center={smoothPosition}
             radius={6}
@@ -197,7 +209,7 @@ export default function MapView() {
             }}
           />
 
-          {/* 📍 Marker tooltip */}
+          {/* tooltip marker */}
           <Marker position={smoothPosition}>
             <Tooltip permanent direction="top" offset={[0, -10]}>
               <div className="text-xs">
