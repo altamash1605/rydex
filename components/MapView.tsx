@@ -8,7 +8,6 @@ import L from 'leaflet';
 import 'leaflet/dist/leaflet.css';
 import RecenterButton from '@/components/RecenterButton';
 
-// ---- dynamic leaflet pieces ----
 const MapContainer = dynamic(() => import('react-leaflet').then(m => m.MapContainer), { ssr: false });
 const TileLayer = dynamic(() => import('react-leaflet').then(m => m.TileLayer), { ssr: false });
 const Polyline = dynamic(() => import('react-leaflet').then(m => m.Polyline), { ssr: false });
@@ -19,14 +18,12 @@ const MapRefBinder = dynamic(() =>
       const map = m.useMapEvents({});
       useEffect(() => {
         if (map) onReady(map);
-        return;
       }, [map, onReady]);
       return null;
     }
   }))
 );
 
-// ---- helper ----
 function haversineM(a: [number, number], b: [number, number]) {
   const R = 6371000;
   const toRad = (d: number) => (d * Math.PI) / 180;
@@ -59,7 +56,6 @@ export default function MapView() {
 
   const [position, setPosition] = useState<[number, number] | null>(null);
 
-  // ---- create marker once map ready ----
   const handleMapReady = (map: LeafletMap) => {
     mapRef.current = map;
     if (!markerRef.current) {
@@ -75,7 +71,6 @@ export default function MapView() {
     }
   };
 
-  // ---- GPS watch ----
   useEffect(() => {
     if (!hasMounted || typeof navigator === 'undefined') return;
 
@@ -117,7 +112,6 @@ export default function MapView() {
     return () => navigator.geolocation.clearWatch(watch);
   }, [hasMounted, isUserPanned, latSpring, lngSpring]);
 
-  // ---- predictive loop updating marker ----
   useEffect(() => {
     if (!hasMounted) return;
     let raf: number;
@@ -142,10 +136,8 @@ export default function MapView() {
       const lat = latSpring.get();
       const lng = lngSpring.get();
 
-      // move marker directly
       if (markerRef.current) markerRef.current.setLatLng([lat, lng]);
 
-      // move tooltip
       if (tooltipRef.current && mapRef.current) {
         const pt = mapRef.current.latLngToContainerPoint(L.latLng(lat, lng));
         tooltipRef.current.style.transform = `translate(${pt.x - 40}px, ${pt.y - 60}px)`;
@@ -158,13 +150,12 @@ export default function MapView() {
     return () => cancelAnimationFrame(raf);
   }, [hasMounted, latSpring, lngSpring]);
 
-  // ---- mount flag ----
   useEffect(() => {
     setHasMounted(true);
   }, []);
 
-  // ---- manual pan detection (build-safe) ----
-  useEffect((): void => {
+  // ✅ fixed block
+  useEffect(() => {
     if (!hasMounted) return;
     const map = mapRef.current;
     if (!map) return;
@@ -189,7 +180,6 @@ export default function MapView() {
 
   const smoothPos: [number, number] = [latSpring.get(), lngSpring.get()];
 
-  // ---- render ----
   return (
     <div className="relative h-full w-full">
       <div className="absolute inset-0">
@@ -224,7 +214,6 @@ export default function MapView() {
         </MapContainer>
       </div>
 
-      {/* tooltip above marker */}
       <div
         ref={tooltipRef}
         className="absolute pointer-events-none bg-white rounded-md shadow px-2 py-1 text-[10px] font-medium"
