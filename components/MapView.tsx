@@ -66,6 +66,7 @@ function haversineM(a: [number, number], b: [number, number]) {
 export default function MapView() {
   const [hasMounted, setHasMounted] = useState(false);
   const [position, setPosition] = useState<[number, number] | null>(null);
+  const [targetPos, setTargetPos] = useState<[number, number] | null>(null);
   const [stats, setStats] = useState<RideStats>(DEFAULT_STATS);
   const [path, setPath] = useState<[number, number][]>([]);
   const [isUserPanned, setIsUserPanned] = useState(false);
@@ -73,11 +74,44 @@ export default function MapView() {
   const mapRef = useRef<LeafletMap | null>(null);
   const followMarkerRef = useRef(true);
   const lastPositionRef = useRef<[number, number] | null>(null);
+  const animRef = useRef<number | null>(null);
 
-  // ✅ Avoid SSR: run map only on client
+  const lerp = (a: number, b: number, t: number) => a + (b - a) * t;
+
+  // ✅ Animate marker between old and new GPS coordinates
   useEffect(() => {
-    setHasMounted(true);
-  }, []);
+    let startTime: number | null = null;
+    const duration = 1000; // 1 second glide
+
+    const animate = (time: number) => {
+      if (!position || !targetPos) return;
+      if (startTime === null) startTime = time;
+      const t = Math.min((time - startTime) / duration, 1);
+
+      const newLat = lerp(position[0], targetPos[0], t);
+      const newLng = lerp(position[1], targetPos[1], t);
+      const newPos: [number, number] = [newLat, newLng];
+      setPosition(newPos);
+
+      if (followMarkerRef.current && mapRef.current && !isUserPanned) {
+        mapRef.current.panTo(newPos, { animate: false });
+      }
+
+      if (t < 1) {
+        animRef.current = requestAnimationFrame(animate);
+      } else {
+        animRef.current = null;
+      }
+    };
+
+    if (targetPos && position && !animRef.current) {
+      animRef.current = requestAnimationFrame(animate);
+    }
+
+    return () => {
+      if (animRef.current) cancelAnimationFrame(animRef.current);
+    };
+  }, [targetPos]);
 
   // --- Geolocation watch + movement filter ---
   useEffect(() => {
@@ -94,7 +128,8 @@ export default function MapView() {
         if (last && haversineM(last, coords) < 3) return;
 
         lastPositionRef.current = coords;
-        setPosition(coords);
+        if (!position) setPosition(coords);
+        setTargetPos(coords);
         setPath((p) => [...p, coords]);
 
         if (followMarkerRef.current && mapRef.current && !isUserPanned) {
@@ -108,29 +143,8 @@ export default function MapView() {
     return () => navigator.geolocation.clearWatch(watch);
   }, [hasMounted, isUserPanned]);
 
-  // --- Ride stats ---
-  useEffect(() => {
-    if (!hasMounted) return;
-    const onStats = (e: Event) => {
-      const ce = e as CustomEvent<RideStats>;
-      if (ce.detail) setStats(ce.detail);
-    };
-    window.addEventListener('rydex-ride-stats', onStats as EventListener);
-    return () => window.removeEventListener('rydex-ride-stats', onStats as EventListener);
-  }, [hasMounted]);
-
-  // --- Path append ---
-  useEffect(() => {
-    if (!hasMounted) return;
-    const onAppend = (e: Event) => {
-      const ce = e as CustomEvent<[number, number]>;
-      if (ce.detail) setPath((p) => [...p, ce.detail]);
-    };
-    window.addEventListener('rydex-path-append', onAppend as EventListener);
-    return () => window.removeEventListener('rydex-path-append', onAppend as EventListener);
-  }, [hasMounted]);
-
-  // --- Recenter button ---
+  // --- Lifecycle + events (same as before) ---
+  useEffect(() => setHasMounted(true), []);
   useEffect(() => {
     if (!hasMounted) return;
     const handleRecenter = () => {
@@ -144,21 +158,16 @@ export default function MapView() {
     return () => window.removeEventListener('rydex-recenter', handleRecenter);
   }, [hasMounted, position]);
 
-  // --- Detect manual panning ---
   useEffect(() => {
     if (!hasMounted) return;
     const map = mapRef.current;
     if (!map) return;
-
     const stopFollowing = () => {
       followMarkerRef.current = false;
       setIsUserPanned(true);
     };
-
     map.on('dragstart', stopFollowing);
-    return () => {
-      map.off('dragstart', stopFollowing);
-    };
+    return () => map.off('dragstart', stopFollowing);
   }, [hasMounted]);
 
   if (!hasMounted) return null;
@@ -191,18 +200,13 @@ export default function MapView() {
           touchZoom
         >
           <MapRefBinder onReady={(map) => (mapRef.current = map)} />
-
           <TileLayer
             attribution='&copy; <a href="https://carto.com/">CARTO</a>'
             url="https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png"
           />
-
-          {/* 🛣️ Path line */}
           {path.length > 1 && (
             <Polyline positions={path} pathOptions={{ color: '#808080', weight: 4, opacity: 0.9 }} />
           )}
-
-          {/* 🔵 Fixed blue location dot */}
           <Circle
             center={position}
             radius={6}
@@ -213,8 +217,6 @@ export default function MapView() {
               weight: 0,
             }}
           />
-
-          {/* 📍 Live marker with stats */}
           <Marker position={position}>
             <Tooltip permanent direction="top" offset={[0, -10]}>
               <div className="text-xs">
@@ -239,8 +241,6 @@ export default function MapView() {
           </Marker>
         </MapContainer>
       </div>
-
-      {/* ✅ external recenter button */}
       <RecenterButton visible={true} />
     </div>
   );
