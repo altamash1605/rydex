@@ -5,7 +5,7 @@ import { useEffect, useRef, useState } from 'react';
 import { useMapEvents } from 'react-leaflet';
 import type { Map as LeafletMap } from 'leaflet';
 import 'leaflet/dist/leaflet.css';
-import RecenterButton from '@/components/RecenterButton'; // ✅ imported new component
+import RecenterButton from '@/components/RecenterButton';
 
 const MapContainer = dynamic(() => import('react-leaflet').then((m) => m.MapContainer), { ssr: false });
 const TileLayer = dynamic(() => import('react-leaflet').then((m) => m.TileLayer), { ssr: false });
@@ -66,6 +66,7 @@ export default function MapView() {
   const [stats, setStats] = useState<RideStats>(DEFAULT_STATS);
   const [path, setPath] = useState<[number, number][]>([]);
   const [isUserPanned, setIsUserPanned] = useState(false);
+
   const mapRef = useRef<LeafletMap | null>(null);
   const animRef = useRef<number | null>(null);
   const followMarkerRef = useRef(true);
@@ -87,10 +88,6 @@ export default function MapView() {
       const newPos = lerp(position, targetPos, t);
       setPosition(newPos);
 
-      if (mapRef.current && followMarkerRef.current && !isUserPanned) {
-        mapRef.current.panTo(newPos, { animate: false });
-      }
-
       if (t < 1) animRef.current = requestAnimationFrame(animate);
       else animRef.current = null;
     };
@@ -102,7 +99,7 @@ export default function MapView() {
     return () => {
       if (animRef.current) cancelAnimationFrame(animRef.current);
     };
-  }, [targetPos, isUserPanned]);
+  }, [targetPos]);
 
   // --- Geolocation watch + movement filter ---
   useEffect(() => {
@@ -124,13 +121,18 @@ export default function MapView() {
         if (!position) setPosition(coords);
         setTargetPos(coords);
         setPath((prev) => [...prev, coords]);
+
+        // ✅ Move map once per GPS update if following is enabled
+        if (followMarkerRef.current && mapRef.current && !isUserPanned) {
+          mapRef.current.setView(coords, mapRef.current.getZoom(), { animate: true });
+        }
       },
       (err) => console.error(err),
       { enableHighAccuracy: true, timeout: 15000, maximumAge: 0 }
     );
 
     return () => navigator.geolocation.clearWatch(watch);
-  }, [position]);
+  }, [position, isUserPanned]);
 
   // --- Listen for ride stats updates ---
   useEffect(() => {
@@ -175,9 +177,7 @@ export default function MapView() {
       setIsUserPanned(true);
     };
     map.on('dragstart', stopFollowing);
-    return () => {
-      map.off('dragstart', stopFollowing);
-    };
+    return () => map.off('dragstart', stopFollowing);
   }, [mapRef.current]);
 
   if (!position) {
@@ -245,7 +245,7 @@ export default function MapView() {
         </MapContainer>
       </div>
 
-      {/* ✅ external recenter button */}
+      {/* ✅ recenter button */}
       <RecenterButton visible={true} />
     </div>
   );
