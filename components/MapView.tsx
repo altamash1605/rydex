@@ -47,14 +47,14 @@ export default function MapView() {
   const mapRef = useRef<LeafletMap | null>(null);
   const markerRef = useRef<L.Marker | null>(null);
   const tooltipRef = useRef<HTMLDivElement | null>(null);
-  const liveSegmentRef = useRef<L.Polyline | null>(null);
   const followMarkerRef = useRef(true);
 
   // --- blending state ---
   const blendFrom = useRef<{ lat: number; lng: number; start: number } | null>(null);
   const blendTo = useRef<{ lat: number; lng: number } | null>(null);
+  const lastTooltipPos = useRef<[number, number] | null>(null);
 
-  // ---- initialize marker and live segment ----
+  // ---- map ready ----
   const handleMapReady = (map: LeafletMap) => {
     mapRef.current = map;
 
@@ -67,11 +67,6 @@ export default function MapView() {
         })
       }).addTo(map);
       markerRef.current = marker;
-    }
-
-    if (!liveSegmentRef.current) {
-      const seg = L.polyline([], { color: '#007bff', weight: 4, opacity: 0.9 }).addTo(map);
-      liveSegmentRef.current = seg;
     }
   };
 
@@ -95,8 +90,6 @@ export default function MapView() {
         }
         blendTo.current = { lat: coords[0], lng: coords[1] };
 
-        setPath(p => [...p, coords]);
-
         if (followMarkerRef.current && mapRef.current && !isUserPanned) {
           mapRef.current.setView(coords, mapRef.current.getZoom(), { animate: true });
         }
@@ -108,11 +101,10 @@ export default function MapView() {
     return () => navigator.geolocation.clearWatch(watch);
   }, [hasMounted, isUserPanned]);
 
-  // ---- continuous blending loop ----
+  // ---- continuous blending + path-following loop ----
   useEffect(() => {
     if (!hasMounted) return undefined;
     let raf: number;
-
     const BLEND_DURATION = 800; // ms
 
     const loop = () => {
@@ -122,30 +114,30 @@ export default function MapView() {
 
       if (blendFrom.current && blendTo.current) {
         const t = Math.min((now - blendFrom.current.start) / BLEND_DURATION, 1);
-        // ease in-out
-        const ease = 0.5 - 0.5 * Math.cos(Math.PI * t);
+        const ease = 0.5 - 0.5 * Math.cos(Math.PI * t); // ease-in-out
         lat = blendFrom.current.lat + (blendTo.current.lat - blendFrom.current.lat) * ease;
         lng = blendFrom.current.lng + (blendTo.current.lng - blendFrom.current.lng) * ease;
-        if (t >= 1) {
-          // end of blend
-          blendFrom.current = null;
-        }
+        if (t >= 1) blendFrom.current = null;
       } else if (blendTo.current) {
         lat = blendTo.current.lat;
         lng = blendTo.current.lng;
       }
 
       if (lat !== null && lng !== null) {
+        // marker + tooltip move
         markerRef.current?.setLatLng([lat, lng]);
-
         if (tooltipRef.current && mapRef.current) {
           const pt = mapRef.current.latLngToContainerPoint(L.latLng(lat, lng));
           tooltipRef.current.style.transform = `translate(${pt.x - 40}px, ${pt.y - 60}px)`;
         }
 
-        if (liveSegmentRef.current && path.length > 0) {
-          const lastPoint = path[path.length - 1];
-          liveSegmentRef.current.setLatLngs([lastPoint, [lat, lng]]);
+        // dynamically extend the path based on tooltip movement
+        const last = lastTooltipPos.current;
+        const current: [number, number] = [lat, lng];
+        if (!last || haversineM(last, current) > 2) {
+          // add to path if moved >2m
+          setPath(p => [...p, current]);
+          lastTooltipPos.current = current;
         }
       }
 
@@ -154,14 +146,14 @@ export default function MapView() {
 
     raf = requestAnimationFrame(loop);
     return () => cancelAnimationFrame(raf);
-  }, [hasMounted, path.length]);
+  }, [hasMounted]);
 
-  // ---- mount flag ----
+  // ---- mount ----
   useEffect(() => {
     setHasMounted(true);
   }, []);
 
-  // ---- manual pan detection (TS-safe) ----
+  // ---- manual pan detection ----
   useEffect((): void | (() => void) => {
     if (!hasMounted) return undefined;
     const map = mapRef.current;
@@ -178,13 +170,12 @@ export default function MapView() {
     };
   }, [hasMounted]);
 
-  if (!hasMounted) {
+  if (!hasMounted)
     return (
       <div className="flex items-center justify-center h-full w-full bg-gray-100">
         <p className="text-gray-600">Fetching location...</p>
       </div>
     );
-  }
 
   const currentCenter = blendTo.current
     ? [blendTo.current.lat, blendTo.current.lng]
@@ -211,7 +202,7 @@ export default function MapView() {
           />
 
           {path.length > 1 && (
-            <Polyline positions={path} pathOptions={{ color: '#808080', weight: 4, opacity: 0.9 }} />
+            <Polyline positions={path} pathOptions={{ color: '#007bff', weight: 4, opacity: 0.9 }} />
           )}
 
           <Circle
@@ -227,7 +218,7 @@ export default function MapView() {
         </MapContainer>
       </div>
 
-      {/* tooltip following marker */}
+      {/* tooltip attached to marker */}
       <div
         ref={tooltipRef}
         className="absolute pointer-events-none bg-white rounded-md shadow px-2 py-1 text-[10px] font-medium"
