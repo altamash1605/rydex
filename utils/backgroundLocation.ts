@@ -1,4 +1,4 @@
-import { BackgroundGeolocation } from '@capacitor-community/background-geolocation';
+import BackgroundGeolocation from '@capacitor-community/background-geolocation';
 
 export async function startBackgroundTracking() {
   // Ask for permission if not already granted
@@ -6,6 +6,7 @@ export async function startBackgroundTracking() {
 
   await BackgroundGeolocation.addWatcher(
     {
+      id: 'rydex-tracker', // optional but helpful
       backgroundMessage: 'Rydex is tracking your ride…',
       backgroundTitle: 'Rydex Tracking',
       distanceFilter: 10, // meters between updates
@@ -20,4 +21,8 @@ export async function startBackgroundTracking() {
       // TODO: send to Supabase or API endpoint if needed
     }
   );
+}
+
+export async function stopBackgroundTracking() {
+  await BackgroundGeolocation.removeWatcher({ id: 'rydex-tracker' });
 }
