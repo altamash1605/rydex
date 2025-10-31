@@ -12,6 +12,7 @@ export function useLeafletLayers() {
 
   const initLayers = (map: LeafletMap) => {
     mapRef.current = map;
+
     if (!polyRef.current) {
       polyRef.current = L.polyline([], {
         color: '#007bff',
@@ -20,6 +21,7 @@ export function useLeafletLayers() {
         renderer: L.canvas(),
       }).addTo(map);
     }
+
     if (!circleRef.current) {
       circleRef.current = L.circle([0, 0], {
         radius: 6,
@@ -46,15 +48,20 @@ export function useLeafletLayers() {
     }
   };
 
-  useEffect(() => {
+  // ✅ Type-safe effect with explicit return type
+  useEffect((): void | (() => void) => {
     const map = mapRef.current;
-    if (!map) return;
+    if (!map) return undefined; // make return type explicit
+
     const stopFollow = () => {
       followMarkerRef.current = false;
       isUserPannedRef.current = true;
     };
+
     map.on('dragstart', stopFollow);
-    return () => map.off('dragstart', stopFollow);
+    return () => {
+      map.off('dragstart', stopFollow);
+    };
   }, []);
 
   return { mapRef, initLayers, updateDot, updatePath, followMarkerRef, isUserPannedRef };
