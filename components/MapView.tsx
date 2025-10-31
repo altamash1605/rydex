@@ -2,12 +2,12 @@
 
 import dynamic from 'next/dynamic';
 import { useEffect, useRef, useState } from 'react';
-import { useSpring } from 'framer-motion';
 import type { Map as LeafletMap } from 'leaflet';
 import L from 'leaflet';
 import 'leaflet/dist/leaflet.css';
 import RecenterButton from '@/components/RecenterButton';
 
+// ---- dynamic leaflet pieces ----
 const MapContainer = dynamic(() => import('react-leaflet').then(m => m.MapContainer), { ssr: false });
 const TileLayer = dynamic(() => import('react-leaflet').then(m => m.TileLayer), { ssr: false });
 const Polyline = dynamic(() => import('react-leaflet').then(m => m.Polyline), { ssr: false });
@@ -24,6 +24,7 @@ const MapRefBinder = dynamic(() =>
   }))
 );
 
+// ---- helpers ----
 function haversineM(a: [number, number], b: [number, number]) {
   const R = 6371000;
   const toRad = (d: number) => (d * Math.PI) / 180;
@@ -45,32 +46,32 @@ export default function MapView() {
   const mapRef = useRef<LeafletMap | null>(null);
   const markerRef = useRef<L.Marker | null>(null);
   const tooltipRef = useRef<HTMLDivElement | null>(null);
+  const liveSegmentRef = useRef<L.Polyline | null>(null);
   const followMarkerRef = useRef(true);
 
-  const lastPosRef = useRef<[number, number] | null>(null);
-  const lastTimeRef = useRef<number | null>(null);
-  const velocityRef = useRef<{ dLat: number; dLng: number }>({ dLat: 0, dLng: 0 });
+  // store last two GPS fixes for interpolation
+  const fixQueue = useRef<{ lat: number; lng: number; time: number }[]>([]);
 
-  const latSpring = useSpring(0, { stiffness: 35, damping: 25, mass: 1.8 });
-  const lngSpring = useSpring(0, { stiffness: 35, damping: 25, mass: 1.8 });
-
-  const [position, setPosition] = useState<[number, number] | null>(null);
-
+  // ---- map ready ----
   const handleMapReady = (map: LeafletMap) => {
     mapRef.current = map;
     if (!markerRef.current) {
-      const m = L.marker([0, 0], {
+      const marker = L.marker([0, 0], {
         icon: L.icon({
-          iconUrl:
-            'https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/images/marker-icon.png',
+          iconUrl: 'https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/images/marker-icon.png',
           iconSize: [25, 41],
           iconAnchor: [12, 41]
         })
       }).addTo(map);
-      markerRef.current = m;
+      markerRef.current = marker;
+    }
+    if (!liveSegmentRef.current) {
+      const seg = L.polyline([], { color: '#007bff', weight: 4, opacity: 0.9 }).addTo(map);
+      liveSegmentRef.current = seg;
     }
   };
 
+  // ---- GPS watch ----
   useEffect(() => {
     if (!hasMounted || typeof navigator === 'undefined') return;
 
@@ -80,26 +81,11 @@ export default function MapView() {
 
     const watch = navigator.geolocation.watchPosition(
       pos => {
-        const now = Date.now();
         const coords: [number, number] = [pos.coords.latitude, pos.coords.longitude];
-        const last = lastPosRef.current;
-        const lastTime = lastTimeRef.current;
-
-        if (last && lastTime) {
-          const dt = (now - lastTime) / 1000;
-          const dist = haversineM(last, coords);
-          if (dist < 2 || dt === 0) return;
-          const dLat = (coords[0] - last[0]) / dt;
-          const dLng = (coords[1] - last[1]) / dt;
-          velocityRef.current = { dLat, dLng };
-        }
-
-        lastPosRef.current = coords;
-        lastTimeRef.current = now;
-        setPosition(coords);
+        const now = Date.now();
+        fixQueue.current.push({ lat: coords[0], lng: coords[1], time: now });
+        if (fixQueue.current.length > 2) fixQueue.current.shift(); // keep only 2
         setPath(p => [...p, coords]);
-        latSpring.set(coords[0]);
-        lngSpring.set(coords[1]);
 
         if (followMarkerRef.current && mapRef.current && !isUserPanned) {
           mapRef.current.setView(coords, mapRef.current.getZoom(), { animate: true });
@@ -110,65 +96,65 @@ export default function MapView() {
     );
 
     return () => navigator.geolocation.clearWatch(watch);
-  }, [hasMounted, isUserPanned, latSpring, lngSpring]);
+  }, [hasMounted, isUserPanned]);
 
+  // ---- continuous interpolation loop ----
   useEffect(() => {
     if (!hasMounted) return;
     let raf: number;
-    let last = performance.now();
 
-    const loop = (t: number) => {
-      const dt = (t - last) / 1000;
-      last = t;
+    const loop = () => {
+      const q = fixQueue.current;
+      if (q.length >= 1) {
+        let lat = q[q.length - 1].lat;
+        let lng = q[q.length - 1].lng;
 
-      const lastPos = lastPosRef.current;
-      if (lastPos) {
-        const { dLat, dLng } = velocityRef.current;
-        const predicted: [number, number] = [
-          lastPos[0] + dLat * dt,
-          lastPos[1] + dLng * dt
-        ];
-        velocityRef.current = { dLat: dLat * 0.995, dLng: dLng * 0.995 };
-        latSpring.set(predicted[0]);
-        lngSpring.set(predicted[1]);
+        if (q.length === 2) {
+          const [p1, p2] = q;
+          const now = Date.now();
+          const t = Math.min((now - p1.time) / (p2.time - p1.time), 1);
+          lat = p1.lat + (p2.lat - p1.lat) * t;
+          lng = p1.lng + (p2.lng - p1.lng) * t;
+        }
+
+        // move marker
+        if (markerRef.current) markerRef.current.setLatLng([lat, lng]);
+
+        // move tooltip
+        if (tooltipRef.current && mapRef.current) {
+          const pt = mapRef.current.latLngToContainerPoint(L.latLng(lat, lng));
+          tooltipRef.current.style.transform = `translate(${pt.x - 40}px, ${pt.y - 60}px)`;
+        }
+
+        // draw live segment from last path point to interpolated point
+        if (liveSegmentRef.current && path.length > 0) {
+          const lastPoint = path[path.length - 1];
+          liveSegmentRef.current.setLatLngs([lastPoint, [lat, lng]]);
+        }
       }
-
-      const lat = latSpring.get();
-      const lng = lngSpring.get();
-
-      if (markerRef.current) markerRef.current.setLatLng([lat, lng]);
-
-      if (tooltipRef.current && mapRef.current) {
-        const pt = mapRef.current.latLngToContainerPoint(L.latLng(lat, lng));
-        tooltipRef.current.style.transform = `translate(${pt.x - 40}px, ${pt.y - 60}px)`;
-      }
-
       raf = requestAnimationFrame(loop);
     };
 
     raf = requestAnimationFrame(loop);
     return () => cancelAnimationFrame(raf);
-  }, [hasMounted, latSpring, lngSpring]);
+  }, [hasMounted, path.length]);
 
+  // ---- mount ----
   useEffect(() => {
     setHasMounted(true);
   }, []);
 
-  // ✅ fixed block
+  // ---- manual pan detection ----
   useEffect(() => {
     if (!hasMounted) return;
     const map = mapRef.current;
     if (!map) return;
-
     const stopFollow = () => {
       followMarkerRef.current = false;
       setIsUserPanned(true);
     };
-
     map.on('dragstart', stopFollow);
-    return () => {
-      map.off('dragstart', stopFollow);
-    };
+    return () => map.off('dragstart', stopFollow);
   }, [hasMounted]);
 
   if (!hasMounted)
@@ -178,13 +164,17 @@ export default function MapView() {
       </div>
     );
 
-  const smoothPos: [number, number] = [latSpring.get(), lngSpring.get()];
+  const currentCenter =
+    fixQueue.current.length > 0
+      ? [fixQueue.current[fixQueue.current.length - 1].lat, fixQueue.current[fixQueue.current.length - 1].lng]
+      : [0, 0];
 
+  // ---- render ----
   return (
     <div className="relative h-full w-full">
       <div className="absolute inset-0">
         <MapContainer
-          center={smoothPos}
+          center={currentCenter as [number, number]}
           zoom={15}
           zoomControl={false}
           attributionControl={false}
@@ -198,11 +188,13 @@ export default function MapView() {
             attribution='&copy; <a href="https://carto.com/">CARTO</a>'
             url="https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png"
           />
+
           {path.length > 1 && (
             <Polyline positions={path} pathOptions={{ color: '#808080', weight: 4, opacity: 0.9 }} />
           )}
+
           <Circle
-            center={smoothPos}
+            center={currentCenter as [number, number]}
             radius={6}
             pathOptions={{
               color: '#007bff',
@@ -214,6 +206,7 @@ export default function MapView() {
         </MapContainer>
       </div>
 
+      {/* smooth tooltip */}
       <div
         ref={tooltipRef}
         className="absolute pointer-events-none bg-white rounded-md shadow px-2 py-1 text-[10px] font-medium"
