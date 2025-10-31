@@ -171,14 +171,19 @@ export default function MapView() {
   // --- Detect manual panning ---
   useEffect(() => {
     const map = mapRef.current;
-    if (!map) return;
+    if (!map) return; // safely exit if not ready
+
     const stopFollowing = () => {
       followMarkerRef.current = false;
       setIsUserPanned(true);
     };
+
     map.on('dragstart', stopFollowing);
-    return () => map.off('dragstart', stopFollowing);
-  }, [mapRef.current]);
+
+    return () => {
+      map.off('dragstart', stopFollowing);
+    };
+  }, []); // run only once
 
   if (!position) {
     return (
@@ -245,7 +250,7 @@ export default function MapView() {
         </MapContainer>
       </div>
 
-      {/* ✅ recenter button */}
+      {/* ✅ external recenter button */}
       <RecenterButton visible={true} />
     </div>
   );
