@@ -2,7 +2,7 @@
 
 import dynamic from 'next/dynamic';
 import { useEffect, useRef, useState } from 'react';
-import { useMapEvents } from 'react-leaflet';
+import { useMapEvents, Circle } from 'react-leaflet';
 import type { Map as LeafletMap } from 'leaflet';
 import 'leaflet/dist/leaflet.css';
 import RecenterButton from '@/components/RecenterButton';
@@ -62,44 +62,13 @@ function MapRefBinder({ onReady }: { onReady: (map: LeafletMap) => void }) {
 
 export default function MapView() {
   const [position, setPosition] = useState<[number, number] | null>(null);
-  const [targetPos, setTargetPos] = useState<[number, number] | null>(null);
   const [stats, setStats] = useState<RideStats>(DEFAULT_STATS);
   const [path, setPath] = useState<[number, number][]>([]);
   const [isUserPanned, setIsUserPanned] = useState(false);
 
   const mapRef = useRef<LeafletMap | null>(null);
-  const animRef = useRef<number | null>(null);
   const followMarkerRef = useRef(true);
   const lastPositionRef = useRef<[number, number] | null>(null);
-
-  const lerp = (start: [number, number], end: [number, number], t: number) =>
-    [start[0] + (end[0] - start[0]) * t, start[1] + (end[1] - start[1]) * t] as [number, number];
-
-  // --- Smooth marker animation ---
-  useEffect(() => {
-    let startTime: number | null = null;
-    const duration = 1000;
-
-    const animate = (time: number) => {
-      if (!position || !targetPos) return;
-      if (startTime === null) startTime = time;
-      const elapsed = time - startTime;
-      const t = Math.min(elapsed / duration, 1);
-      const newPos = lerp(position, targetPos, t);
-      setPosition(newPos);
-
-      if (t < 1) animRef.current = requestAnimationFrame(animate);
-      else animRef.current = null;
-    };
-
-    if (targetPos && position && !animRef.current) {
-      animRef.current = requestAnimationFrame(animate);
-    }
-
-    return () => {
-      if (animRef.current) cancelAnimationFrame(animRef.current);
-    };
-  }, [targetPos]);
 
   // --- Geolocation watch + movement filter ---
   useEffect(() => {
@@ -118,11 +87,14 @@ export default function MapView() {
         if (last && haversineM(last, coords) < 3) return;
 
         lastPositionRef.current = coords;
-        if (!position) setPosition(coords);
-        setTargetPos(coords);
+
+        // ✅ Immediately update marker position
+        setPosition(coords);
+
+        // ✅ Append to path
         setPath((prev) => [...prev, coords]);
 
-        // ✅ Move map once per GPS update if following is enabled
+        // ✅ Follow marker if recenter mode is active
         if (followMarkerRef.current && mapRef.current && !isUserPanned) {
           mapRef.current.setView(coords, mapRef.current.getZoom(), { animate: true });
         }
@@ -132,7 +104,7 @@ export default function MapView() {
     );
 
     return () => navigator.geolocation.clearWatch(watch);
-  }, [position, isUserPanned]);
+  }, [isUserPanned]);
 
   // --- Listen for ride stats updates ---
   useEffect(() => {
@@ -171,7 +143,7 @@ export default function MapView() {
   // --- Detect manual panning ---
   useEffect(() => {
     const map = mapRef.current;
-    if (!map) return; // safely exit if not ready
+    if (!map) return;
 
     const stopFollowing = () => {
       followMarkerRef.current = false;
@@ -221,10 +193,24 @@ export default function MapView() {
             url="https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png"
           />
 
+          {/* 🛣️ Path line */}
           {path.length > 1 && (
             <Polyline positions={path} pathOptions={{ color: '#808080', weight: 4, opacity: 0.9 }} />
           )}
 
+          {/* 🟦 Pulsing blue circle under marker */}
+          <Circle
+            center={position}
+            radius={12}
+            pathOptions={{
+              color: '#007bff',
+              fillColor: '#007bff',
+              fillOpacity: 0.35,
+              weight: 1,
+            }}
+          />
+
+          {/* 📍 Live marker */}
           <Marker position={position}>
             <Tooltip permanent direction="top" offset={[0, -10]}>
               <div className="text-xs">
@@ -252,6 +238,27 @@ export default function MapView() {
 
       {/* ✅ external recenter button */}
       <RecenterButton visible={true} />
+
+      {/* 🌊 Simple CSS pulse animation */}
+      <style jsx global>{`
+        .leaflet-interactive {
+          animation: pulse 2s infinite;
+        }
+        @keyframes pulse {
+          0% {
+            transform: scale(1);
+            opacity: 0.6;
+          }
+          50% {
+            transform: scale(1.5);
+            opacity: 0.2;
+          }
+          100% {
+            transform: scale(1);
+            opacity: 0.6;
+          }
+        }
+      `}</style>
     </div>
   );
 }
