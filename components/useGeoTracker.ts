@@ -9,20 +9,13 @@ function haversineM(a:[number,number],b:[number,number]){
   return 2*R*Math.atan2(Math.sqrt(s),Math.sqrt(1-s));
 }
 
-// --- simple Kalman smoother (same as before) ---
+// --- simple Kalman smoother (unchanged) ---
 class SimpleKalman{
   pos:[number,number];
   vel:[number,number];
-  processNoise:number;
-  measureNoise:number;
-
-  constructor(lat:number,lng:number){
-    this.pos=[lat,lng];
-    this.vel=[0,0];
-    this.processNoise=0.00005;
-    this.measureNoise=0.001;
-  }
-
+  processNoise=0.00005;
+  measureNoise=0.001;
+  constructor(lat:number,lng:number){ this.pos=[lat,lng]; this.vel=[0,0]; }
   update(lat:number,lng:number,dt:number){
     this.pos[0]+=this.vel[0]*dt;
     this.pos[1]+=this.vel[1]*dt;
@@ -33,12 +26,8 @@ class SimpleKalman{
     this.pos[0]+=k*(lat-this.pos[0]);
     this.pos[1]+=k*(lng-this.pos[1]);
   }
-
   predict(dt:number){
-    return [
-      this.pos[0]+this.vel[0]*dt,
-      this.pos[1]+this.vel[1]*dt
-    ] as [number,number];
+    return [this.pos[0]+this.vel[0]*dt,this.pos[1]+this.vel[1]*dt] as [number,number];
   }
 }
 
@@ -47,12 +36,13 @@ export function useGeoTracker(){
   const [path,setPath]=useState<[number,number][]>([]);
   const kalmanRef=useRef<SimpleKalman|null>(null);
   const lastFixTime=useRef<number|null>(null);
-  const lastPathPos=useRef<[number,number]|null>(null);
+  const lastFix=useRef<[number,number]|null>(null);
   const currentPos=useRef<[number,number]|null>(null);
+  const smoothedSpeed=useRef(0); // computed m/s
 
-  // threshold config
-  const SPEED_THRESHOLD = 0.5;  // m/s (≈1.8 km/h)
-  const DIST_THRESHOLD  = 3;    // m
+  // thresholds
+  const SPEED_THRESHOLD = 0.5; // m/s
+  const DIST_THRESHOLD  = 2;   // m
 
   useEffect(()=>{
     if(typeof navigator==='undefined') return;
@@ -60,30 +50,34 @@ export function useGeoTracker(){
       pos=>{
         const coords:[number,number]=[pos.coords.latitude,pos.coords.longitude];
         const now=Date.now();
-        const speed = pos.coords.speed ?? 0;
+
+        // --- compute dt and distance since last fix ---
+        const dt=(lastFixTime.current ? (now - lastFixTime.current)/1000 : 1);
+        const dist=(lastFix.current ? haversineM(lastFix.current, coords) : 0);
+
+        // --- compute our own speed (m/s) ---
+        const rawSpeed = dist/dt;
+        // exponential smoothing for stability
+        smoothedSpeed.current = smoothedSpeed.current*0.7 + rawSpeed*0.3;
+
+        lastFix.current = coords;
+        lastFixTime.current = now;
 
         if(!kalmanRef.current){
           kalmanRef.current=new SimpleKalman(coords[0],coords[1]);
-          lastFixTime.current=now;
           currentPos.current=coords;
-          lastPathPos.current=coords;
           setPath([coords]);
           return;
         }
 
-        const dt=(now-(lastFixTime.current??now))/1000;
-        lastFixTime.current=now;
-
         kalmanRef.current.update(coords[0],coords[1],dt);
-        currentPos.current=coords; // keep latest fix for distance check
 
-        // --- ✅ Only add to path if actually moving ---
-        const last = lastPathPos.current;
-        const moved = last ? haversineM(last, coords) : 0;
-        if (speed > SPEED_THRESHOLD || moved > DIST_THRESHOLD) {
+        // ✅ Only extend path if moving enough
+        if (smoothedSpeed.current > SPEED_THRESHOLD && dist > DIST_THRESHOLD) {
           setPath(p => [...p, coords]);
-          lastPathPos.current = coords;
         }
+
+        currentPos.current=coords;
       },
       err=>console.error(err),
       {enableHighAccuracy:true,timeout:15000,maximumAge:0}
