@@ -13,6 +13,8 @@ const Marker = dynamic(() => import('react-leaflet').then((m) => m.Marker), { ss
 const Tooltip = dynamic(() => import('react-leaflet').then((m) => m.Tooltip), { ssr: false });
 const Polyline = dynamic(() => import('react-leaflet').then((m) => m.Polyline), { ssr: false });
 const Circle = dynamic(() => import('react-leaflet').then((m) => m.Circle), { ssr: false });
+
+// ✅ Safe map binder for dynamic import
 const MapRefBinder = dynamic(() =>
   import('react-leaflet').then((m) => ({
     default: function MapRefBinder({ onReady }: { onReady: (map: LeafletMap) => void }) {
@@ -78,10 +80,10 @@ export default function MapView() {
 
   const lerp = (a: number, b: number, t: number) => a + (b - a) * t;
 
-  // ✅ Animate marker between old and new GPS coordinates
+  // ✅ Smooth marker glide animation
   useEffect(() => {
     let startTime: number | null = null;
-    const duration = 1000; // 1 second glide
+    const duration = 1000;
 
     const animate = (time: number) => {
       if (!position || !targetPos) return;
@@ -143,8 +145,12 @@ export default function MapView() {
     return () => navigator.geolocation.clearWatch(watch);
   }, [hasMounted, isUserPanned]);
 
-  // --- Lifecycle + events (same as before) ---
-  useEffect(() => setHasMounted(true), []);
+  // --- Client mount ---
+  useEffect(() => {
+    setHasMounted(true);
+  }, []);
+
+  // --- Recenter button handler ---
   useEffect(() => {
     if (!hasMounted) return;
     const handleRecenter = () => {
@@ -158,17 +164,23 @@ export default function MapView() {
     return () => window.removeEventListener('rydex-recenter', handleRecenter);
   }, [hasMounted, position]);
 
+  // --- Detect manual panning (build-safe fix) ---
   useEffect(() => {
     if (!hasMounted) return;
     const map = mapRef.current;
     if (!map) return;
+
     const stopFollowing = () => {
       followMarkerRef.current = false;
       setIsUserPanned(true);
     };
+
     map.on('dragstart', stopFollowing);
-    return () => map.off('dragstart', stopFollowing);
-  }, [hasMounted]);
+
+    return () => {
+      map.off('dragstart', stopFollowing);
+    };
+  }, [hasMounted]); // ✅ returns void always (fixes build error)
 
   if (!hasMounted) return null;
   if (!position)
@@ -200,13 +212,18 @@ export default function MapView() {
           touchZoom
         >
           <MapRefBinder onReady={(map) => (mapRef.current = map)} />
+
           <TileLayer
             attribution='&copy; <a href="https://carto.com/">CARTO</a>'
             url="https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png"
           />
+
+          {/* 🛣️ Path line */}
           {path.length > 1 && (
             <Polyline positions={path} pathOptions={{ color: '#808080', weight: 4, opacity: 0.9 }} />
           )}
+
+          {/* 🔵 Fixed blue location dot */}
           <Circle
             center={position}
             radius={6}
@@ -217,6 +234,8 @@ export default function MapView() {
               weight: 0,
             }}
           />
+
+          {/* 📍 Marker tooltip */}
           <Marker position={position}>
             <Tooltip permanent direction="top" offset={[0, -10]}>
               <div className="text-xs">
@@ -241,6 +260,8 @@ export default function MapView() {
           </Marker>
         </MapContainer>
       </div>
+
+      {/* ✅ external recenter button */}
       <RecenterButton visible={true} />
     </div>
   );
