@@ -197,23 +197,24 @@ export default function MapView() {
             url="https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png"
           />
 
+          {/* 🛣️ Path line */}
           {path.length > 1 && (
             <Polyline positions={path} pathOptions={{ color: '#808080', weight: 4, opacity: 0.9 }} />
           )}
 
-          {/* 🟦 Pulsing blue circle */}
+          {/* 🔵 Fixed blue location dot */}
           <Circle
             center={position}
-            radius={12}
+            radius={6}
             pathOptions={{
               color: '#007bff',
               fillColor: '#007bff',
-              fillOpacity: 0.35,
-              weight: 1,
+              fillOpacity: 0.9,
+              weight: 0,
             }}
           />
 
-          {/* 📍 Live marker */}
+          {/* 📍 Live marker with stats */}
           <Marker position={position}>
             <Tooltip permanent direction="top" offset={[0, -10]}>
               <div className="text-xs">
@@ -239,28 +240,8 @@ export default function MapView() {
         </MapContainer>
       </div>
 
+      {/* ✅ external recenter button */}
       <RecenterButton visible={true} />
-
-      {/* 🌊 Pulse effect */}
-      <style jsx global>{`
-        .leaflet-interactive {
-          animation: pulse 2s infinite;
-        }
-        @keyframes pulse {
-          0% {
-            transform: scale(1);
-            opacity: 0.6;
-          }
-          50% {
-            transform: scale(1.5);
-            opacity: 0.2;
-          }
-          100% {
-            transform: scale(1);
-            opacity: 0.6;
-          }
-        }
-      `}</style>
     </div>
   );
 }
