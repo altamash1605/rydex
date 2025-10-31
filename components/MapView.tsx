@@ -7,7 +7,7 @@ import L from 'leaflet';
 import 'leaflet/dist/leaflet.css';
 import RecenterButton from '@/components/RecenterButton';
 
-// ---- dynamic leaflet pieces ----
+// ---- dynamic leaflet components ----
 const MapContainer = dynamic(() => import('react-leaflet').then(m => m.MapContainer), { ssr: false });
 const TileLayer = dynamic(() => import('react-leaflet').then(m => m.TileLayer), { ssr: false });
 const Polyline = dynamic(() => import('react-leaflet').then(m => m.Polyline), { ssr: false });
@@ -18,6 +18,7 @@ const MapRefBinder = dynamic(() =>
       const map = m.useMapEvents({});
       useEffect(() => {
         if (map) onReady(map);
+        return undefined;
       }, [map, onReady]);
       return null;
     }
@@ -49,12 +50,13 @@ export default function MapView() {
   const liveSegmentRef = useRef<L.Polyline | null>(null);
   const followMarkerRef = useRef(true);
 
-  // store last two GPS fixes for interpolation
+  // keep last 2 GPS fixes for interpolation
   const fixQueue = useRef<{ lat: number; lng: number; time: number }[]>([]);
 
-  // ---- map ready ----
+  // ---- initialize marker and live segment ----
   const handleMapReady = (map: LeafletMap) => {
     mapRef.current = map;
+
     if (!markerRef.current) {
       const marker = L.marker([0, 0], {
         icon: L.icon({
@@ -65,15 +67,16 @@ export default function MapView() {
       }).addTo(map);
       markerRef.current = marker;
     }
+
     if (!liveSegmentRef.current) {
       const seg = L.polyline([], { color: '#007bff', weight: 4, opacity: 0.9 }).addTo(map);
       liveSegmentRef.current = seg;
     }
   };
 
-  // ---- GPS watch ----
+  // ---- GPS tracking ----
   useEffect(() => {
-    if (!hasMounted || typeof navigator === 'undefined') return;
+    if (!hasMounted || typeof navigator === 'undefined') return undefined;
 
     import('leaflet-defaulticon-compatibility').then(() =>
       import('leaflet-defaulticon-compatibility/dist/leaflet-defaulticon-compatibility.css')
@@ -84,7 +87,8 @@ export default function MapView() {
         const coords: [number, number] = [pos.coords.latitude, pos.coords.longitude];
         const now = Date.now();
         fixQueue.current.push({ lat: coords[0], lng: coords[1], time: now });
-        if (fixQueue.current.length > 2) fixQueue.current.shift(); // keep only 2
+        if (fixQueue.current.length > 2) fixQueue.current.shift(); // keep 2
+
         setPath(p => [...p, coords]);
 
         if (followMarkerRef.current && mapRef.current && !isUserPanned) {
@@ -95,12 +99,14 @@ export default function MapView() {
       { enableHighAccuracy: true, timeout: 15000, maximumAge: 0 }
     );
 
-    return () => navigator.geolocation.clearWatch(watch);
+    return () => {
+      navigator.geolocation.clearWatch(watch);
+    };
   }, [hasMounted, isUserPanned]);
 
-  // ---- continuous interpolation loop ----
+  // ---- 60FPS interpolation loop ----
   useEffect(() => {
-    if (!hasMounted) return;
+    if (!hasMounted) return undefined;
     let raf: number;
 
     const loop = () => {
@@ -118,7 +124,7 @@ export default function MapView() {
         }
 
         // move marker
-        if (markerRef.current) markerRef.current.setLatLng([lat, lng]);
+        markerRef.current?.setLatLng([lat, lng]);
 
         // move tooltip
         if (tooltipRef.current && mapRef.current) {
@@ -126,12 +132,13 @@ export default function MapView() {
           tooltipRef.current.style.transform = `translate(${pt.x - 40}px, ${pt.y - 60}px)`;
         }
 
-        // draw live segment from last path point to interpolated point
+        // draw live segment
         if (liveSegmentRef.current && path.length > 0) {
           const lastPoint = path[path.length - 1];
           liveSegmentRef.current.setLatLngs([lastPoint, [lat, lng]]);
         }
       }
+
       raf = requestAnimationFrame(loop);
     };
 
@@ -139,30 +146,35 @@ export default function MapView() {
     return () => cancelAnimationFrame(raf);
   }, [hasMounted, path.length]);
 
-  // ---- mount ----
+  // ---- mount flag ----
   useEffect(() => {
     setHasMounted(true);
   }, []);
 
-  // ---- manual pan detection ----
-  useEffect(() => {
-    if (!hasMounted) return;
+  // ---- manual pan detection (fixed TS type) ----
+  useEffect((): void | (() => void) => {
+    if (!hasMounted) return undefined;
     const map = mapRef.current;
-    if (!map) return;
+    if (!map) return undefined;
+
     const stopFollow = () => {
       followMarkerRef.current = false;
       setIsUserPanned(true);
     };
+
     map.on('dragstart', stopFollow);
-    return () => map.off('dragstart', stopFollow);
+    return () => {
+      map.off('dragstart', stopFollow);
+    };
   }, [hasMounted]);
 
-  if (!hasMounted)
+  if (!hasMounted) {
     return (
       <div className="flex items-center justify-center h-full w-full bg-gray-100">
         <p className="text-gray-600">Fetching location...</p>
       </div>
     );
+  }
 
   const currentCenter =
     fixQueue.current.length > 0
@@ -206,7 +218,7 @@ export default function MapView() {
         </MapContainer>
       </div>
 
-      {/* smooth tooltip */}
+      {/* floating tooltip */}
       <div
         ref={tooltipRef}
         className="absolute pointer-events-none bg-white rounded-md shadow px-2 py-1 text-[10px] font-medium"
