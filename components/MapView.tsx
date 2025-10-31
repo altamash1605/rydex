@@ -50,8 +50,9 @@ export default function MapView() {
   const liveSegmentRef = useRef<L.Polyline | null>(null);
   const followMarkerRef = useRef(true);
 
-  // keep last 2 GPS fixes for interpolation
-  const fixQueue = useRef<{ lat: number; lng: number; time: number }[]>([]);
+  // --- blending state ---
+  const blendFrom = useRef<{ lat: number; lng: number; start: number } | null>(null);
+  const blendTo = useRef<{ lat: number; lng: number } | null>(null);
 
   // ---- initialize marker and live segment ----
   const handleMapReady = (map: LeafletMap) => {
@@ -86,8 +87,13 @@ export default function MapView() {
       pos => {
         const coords: [number, number] = [pos.coords.latitude, pos.coords.longitude];
         const now = Date.now();
-        fixQueue.current.push({ lat: coords[0], lng: coords[1], time: now });
-        if (fixQueue.current.length > 2) fixQueue.current.shift(); // keep 2
+
+        // start blending from current marker position to new fix
+        const current = markerRef.current?.getLatLng();
+        if (current) {
+          blendFrom.current = { lat: current.lat, lng: current.lng, start: now };
+        }
+        blendTo.current = { lat: coords[0], lng: coords[1] };
 
         setPath(p => [...p, coords]);
 
@@ -99,40 +105,44 @@ export default function MapView() {
       { enableHighAccuracy: true, timeout: 15000, maximumAge: 0 }
     );
 
-    return () => {
-      navigator.geolocation.clearWatch(watch);
-    };
+    return () => navigator.geolocation.clearWatch(watch);
   }, [hasMounted, isUserPanned]);
 
-  // ---- 60FPS interpolation loop ----
+  // ---- continuous blending loop ----
   useEffect(() => {
     if (!hasMounted) return undefined;
     let raf: number;
 
+    const BLEND_DURATION = 800; // ms
+
     const loop = () => {
-      const q = fixQueue.current;
-      if (q.length >= 1) {
-        let lat = q[q.length - 1].lat;
-        let lng = q[q.length - 1].lng;
+      const now = Date.now();
+      let lat: number | null = null;
+      let lng: number | null = null;
 
-        if (q.length === 2) {
-          const [p1, p2] = q;
-          const now = Date.now();
-          const t = Math.min((now - p1.time) / (p2.time - p1.time), 1);
-          lat = p1.lat + (p2.lat - p1.lat) * t;
-          lng = p1.lng + (p2.lng - p1.lng) * t;
+      if (blendFrom.current && blendTo.current) {
+        const t = Math.min((now - blendFrom.current.start) / BLEND_DURATION, 1);
+        // ease in-out
+        const ease = 0.5 - 0.5 * Math.cos(Math.PI * t);
+        lat = blendFrom.current.lat + (blendTo.current.lat - blendFrom.current.lat) * ease;
+        lng = blendFrom.current.lng + (blendTo.current.lng - blendFrom.current.lng) * ease;
+        if (t >= 1) {
+          // end of blend
+          blendFrom.current = null;
         }
+      } else if (blendTo.current) {
+        lat = blendTo.current.lat;
+        lng = blendTo.current.lng;
+      }
 
-        // move marker
+      if (lat !== null && lng !== null) {
         markerRef.current?.setLatLng([lat, lng]);
 
-        // move tooltip
         if (tooltipRef.current && mapRef.current) {
           const pt = mapRef.current.latLngToContainerPoint(L.latLng(lat, lng));
           tooltipRef.current.style.transform = `translate(${pt.x - 40}px, ${pt.y - 60}px)`;
         }
 
-        // draw live segment
         if (liveSegmentRef.current && path.length > 0) {
           const lastPoint = path[path.length - 1];
           liveSegmentRef.current.setLatLngs([lastPoint, [lat, lng]]);
@@ -151,7 +161,7 @@ export default function MapView() {
     setHasMounted(true);
   }, []);
 
-  // ---- manual pan detection (fixed TS type) ----
+  // ---- manual pan detection (TS-safe) ----
   useEffect((): void | (() => void) => {
     if (!hasMounted) return undefined;
     const map = mapRef.current;
@@ -176,10 +186,9 @@ export default function MapView() {
     );
   }
 
-  const currentCenter =
-    fixQueue.current.length > 0
-      ? [fixQueue.current[fixQueue.current.length - 1].lat, fixQueue.current[fixQueue.current.length - 1].lng]
-      : [0, 0];
+  const currentCenter = blendTo.current
+    ? [blendTo.current.lat, blendTo.current.lng]
+    : [0, 0];
 
   // ---- render ----
   return (
@@ -218,7 +227,7 @@ export default function MapView() {
         </MapContainer>
       </div>
 
-      {/* floating tooltip */}
+      {/* tooltip following marker */}
       <div
         ref={tooltipRef}
         className="absolute pointer-events-none bg-white rounded-md shadow px-2 py-1 text-[10px] font-medium"
