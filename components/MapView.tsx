@@ -65,19 +65,24 @@ export default function MapView() {
     }
   };
 
-  // --- Pause follow when user manually pans ---
+// --- Pause follow when user manually pans ---
 useEffect((): void | (() => void) => {
   const map = mapRef.current;
-  if (!map) return undefined; // ✅ explicit undefined
+  if (!map) return undefined; // wait until map exists
 
-  const stopFollow = () => setIsFollowing(false);
+  const stopFollow = () => {
+    setIsFollowing(false);
+    console.log('🛑 Follow paused — user panned map');
+  };
+
+  // Attach once
   map.on('dragstart', stopFollow);
 
-  // ✅ proper cleanup return type
+  // Cleanup
   return () => {
     map.off('dragstart', stopFollow);
   };
-}, []);
+}, [mapRef.current]); // ✅ depend on mapRef.current
 
   const center = path[path.length - 1] ?? [0, 0];
 
