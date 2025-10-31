@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 
+// --- helper ---
 function haversineM(a:[number,number],b:[number,number]){
   const R=6371000,toRad=(d:number)=>(d*Math.PI)/180;
   const dLat=toRad(b[0]-a[0]),dLng=toRad(b[1]-a[1]);
@@ -8,12 +9,23 @@ function haversineM(a:[number,number],b:[number,number]){
   return 2*R*Math.atan2(Math.sqrt(s),Math.sqrt(1-s));
 }
 
+// --- simple Kalman smoother (same as before) ---
 class SimpleKalman{
-  pos:[number,number]; vel:[number,number];
-  processNoise=0.00005; measureNoise=0.001;
-  constructor(lat:number,lng:number){ this.pos=[lat,lng]; this.vel=[0,0]; }
+  pos:[number,number];
+  vel:[number,number];
+  processNoise:number;
+  measureNoise:number;
+
+  constructor(lat:number,lng:number){
+    this.pos=[lat,lng];
+    this.vel=[0,0];
+    this.processNoise=0.00005;
+    this.measureNoise=0.001;
+  }
+
   update(lat:number,lng:number,dt:number){
-    this.pos[0]+=this.vel[0]*dt; this.pos[1]+=this.vel[1]*dt;
+    this.pos[0]+=this.vel[0]*dt;
+    this.pos[1]+=this.vel[1]*dt;
     const k=this.processNoise/(this.processNoise+this.measureNoise);
     const newVel:[number,number]=[(lat-this.pos[0])/dt,(lng-this.pos[1])/dt];
     this.vel[0]=this.vel[0]*(1-k)+newVel[0]*k;
@@ -21,14 +33,26 @@ class SimpleKalman{
     this.pos[0]+=k*(lat-this.pos[0]);
     this.pos[1]+=k*(lng-this.pos[1]);
   }
-  predict(dt:number){ return [this.pos[0]+this.vel[0]*dt,this.pos[1]+this.vel[1]*dt] as [number,number]; }
+
+  predict(dt:number){
+    return [
+      this.pos[0]+this.vel[0]*dt,
+      this.pos[1]+this.vel[1]*dt
+    ] as [number,number];
+  }
 }
 
+// --- Hook ---
 export function useGeoTracker(){
   const [path,setPath]=useState<[number,number][]>([]);
   const kalmanRef=useRef<SimpleKalman|null>(null);
   const lastFixTime=useRef<number|null>(null);
+  const lastPathPos=useRef<[number,number]|null>(null);
   const currentPos=useRef<[number,number]|null>(null);
+
+  // threshold config
+  const SPEED_THRESHOLD = 0.5;  // m/s (≈1.8 km/h)
+  const DIST_THRESHOLD  = 3;    // m
 
   useEffect(()=>{
     if(typeof navigator==='undefined') return;
@@ -36,17 +60,30 @@ export function useGeoTracker(){
       pos=>{
         const coords:[number,number]=[pos.coords.latitude,pos.coords.longitude];
         const now=Date.now();
+        const speed = pos.coords.speed ?? 0;
+
         if(!kalmanRef.current){
           kalmanRef.current=new SimpleKalman(coords[0],coords[1]);
           lastFixTime.current=now;
           currentPos.current=coords;
+          lastPathPos.current=coords;
           setPath([coords]);
           return;
         }
+
         const dt=(now-(lastFixTime.current??now))/1000;
         lastFixTime.current=now;
+
         kalmanRef.current.update(coords[0],coords[1],dt);
-        setPath(p=>[...p,coords]);
+        currentPos.current=coords; // keep latest fix for distance check
+
+        // --- ✅ Only add to path if actually moving ---
+        const last = lastPathPos.current;
+        const moved = last ? haversineM(last, coords) : 0;
+        if (speed > SPEED_THRESHOLD || moved > DIST_THRESHOLD) {
+          setPath(p => [...p, coords]);
+          lastPathPos.current = coords;
+        }
       },
       err=>console.error(err),
       {enableHighAccuracy:true,timeout:15000,maximumAge:0}
@@ -54,6 +91,7 @@ export function useGeoTracker(){
     return()=>navigator.geolocation.clearWatch(watch);
   },[]);
 
+  // prediction + lag
   useEffect(()=>{
     let raf:number;
     const LAG=500;
