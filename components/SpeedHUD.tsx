@@ -3,7 +3,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 
-// --- helpers ---
 function distM(a: GeolocationCoordinates, b: GeolocationCoordinates) {
   const R = 6371000;
   const toRad = (d: number) => (d * Math.PI) / 180;
@@ -33,17 +32,19 @@ export default function SpeedHUD() {
 
   const last = useRef<{ coords: GeolocationCoordinates; t: number } | null>(null);
 
-  // --- Speed tracking ---
+  // ---- SPEED TRACKING ----
   useEffect(() => {
     if (!navigator.geolocation) return;
     const id = navigator.geolocation.watchPosition(
       (pos) => {
         const { coords, timestamp } = pos;
         setAccuracy(typeof coords.accuracy === 'number' ? coords.accuracy : null);
+
         let speedMS =
           typeof coords.speed === 'number' && !Number.isNaN(coords.speed)
             ? coords.speed
             : null;
+
         if (!speedMS && last.current) {
           const dt = (timestamp - last.current.t) / 1000;
           if (dt > 0.5 && dt < 10) {
@@ -55,10 +56,12 @@ export default function SpeedHUD() {
           const d = distM(last.current.coords, coords);
           if (d < 200) setTotalM((m) => m + d);
         }
+
         if (speedMS != null) {
           const kmhVal = Math.max(0, Math.min(120, speedMS * 3.6));
           setKmh(Number(kmhVal.toFixed(1)));
         }
+
         last.current = { coords, t: timestamp };
       },
       (err) => console.warn('Geolocation error', err),
@@ -67,18 +70,17 @@ export default function SpeedHUD() {
     return () => navigator.geolocation.clearWatch(id);
   }, []);
 
-  // --- Listen for ride stats from RideController ---
+  // ---- LISTEN TO RIDE EVENTS ----
   useEffect(() => {
     const onStats = (e: any) => {
-      const detail = e.detail;
-      setPhase(detail.phase);
-      setPickupSec(detail.pickupSec);
-      setRideSec(detail.rideSec);
+      const d = e.detail;
+      setPhase(d.phase);
+      setPickupSec(d.pickupSec);
+      setRideSec(d.rideSec);
 
-      if (detail.phase === 'toPickup' && !pickupStartAt) setPickupStartAt(Date.now());
-      if (detail.phase === 'riding' && !rideStartAt) setRideStartAt(Date.now());
-      if (detail.phase === 'idle') {
-        // detect if coming from riding phase (ride just ended)
+      if (d.phase === 'toPickup' && !pickupStartAt) setPickupStartAt(Date.now());
+      if (d.phase === 'riding' && !rideStartAt) setRideStartAt(Date.now());
+      if (d.phase === 'idle') {
         if (rideStartAt && !lastRideEndAt) setLastRideEndAt(Date.now());
         setPickupStartAt(null);
         setRideStartAt(null);
@@ -88,46 +90,44 @@ export default function SpeedHUD() {
     return () => window.removeEventListener('rydex-ride-stats', onStats);
   }, [pickupStartAt, rideStartAt, lastRideEndAt]);
 
-  // --- compute strings ---
   const now = Date.now();
-  const formatMins = (s: number) => `${Math.floor(s / 60)}m`;
+  const expanded = phase === 'toPickup' || phase === 'riding';
   const startedAt = (t: number | null) =>
     t ? new Date(t).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '--';
+  const formatMins = (s: number) => `${Math.floor(s / 60)}m`;
   const lastRideAgo =
     lastRideEndAt ? `${Math.max(1, Math.floor((now - lastRideEndAt) / 60000))}m ago` : null;
 
-  const expanded = phase === 'toPickup' || phase === 'riding';
-
   return (
-    <motion.div
-      className="absolute bottom-24 md:bottom-12 left-1/2 -translate-x-1/2 z-20"
-      animate={{
-        width: expanded ? 280 : 180,
-        scale: expanded ? 1.05 : 1,
-      }}
-      transition={{
-        type: 'spring',
-        stiffness: 200,
-        damping: 20,
-      }}
+    <div
+      className="absolute bottom-24 md:bottom-12 left-1/2 z-20 pointer-events-none"
+      style={{ transform: 'translateX(-50%)' }}
     >
-      <div className="rounded-xl bg-black/80 text-white px-4 py-2 shadow-lg text-center overflow-hidden">
+      <motion.div
+        className="pointer-events-auto rounded-xl bg-black/80 text-white px-4 py-2 shadow-lg text-center overflow-hidden origin-center max-w-[90vw]"
+        animate={{ scaleX: expanded ? 1.3 : 1, scaleY: expanded ? 1.05 : 1 }}
+        transition={{
+          type: 'spring',
+          stiffness: 180,
+          damping: 16,
+        }}
+      >
         <div className="text-[28px] leading-none font-semibold tracking-tight">
           {kmh !== null ? `${kmh}` : '--'}{' '}
           <span className="text-sm font-medium">km/h</span>
         </div>
         <div className="mt-1 text-[11px] text-white/70">
-          dist {(totalM / 1000).toFixed(2)} km · acc {accuracy ? `${Math.round(accuracy)}m` : '--'}
+          dist {(totalM / 1000).toFixed(2)} km · acc{' '}
+          {accuracy ? `${Math.round(accuracy)}m` : '--'}
         </div>
 
-        {/* Extra info */}
         <AnimatePresence mode="wait">
           {phase === 'toPickup' && (
             <motion.div
               key="pickup"
-              initial={{ opacity: 0 }}
-              animate={{ opacity: 1 }}
-              exit={{ opacity: 0 }}
+              initial={{ opacity: 0, y: 4 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: -4 }}
               transition={{ duration: 0.3 }}
               className="mt-2 text-xs text-white/80"
             >
@@ -140,9 +140,9 @@ export default function SpeedHUD() {
           {phase === 'riding' && (
             <motion.div
               key="riding"
-              initial={{ opacity: 0 }}
-              animate={{ opacity: 1 }}
-              exit={{ opacity: 0 }}
+              initial={{ opacity: 0, y: 4 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: -4 }}
               transition={{ duration: 0.3 }}
               className="mt-2 text-xs text-white/80"
             >
@@ -152,12 +152,12 @@ export default function SpeedHUD() {
             </motion.div>
           )}
 
-          {phase === 'idle' && !expanded && (
+          {phase === 'idle' && (
             <motion.div
               key="idle"
-              initial={{ opacity: 0 }}
-              animate={{ opacity: 1 }}
-              exit={{ opacity: 0 }}
+              initial={{ opacity: 0, y: 4 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: -4 }}
               transition={{ duration: 0.3 }}
               className="mt-2 text-xs text-white/70"
             >
@@ -165,7 +165,7 @@ export default function SpeedHUD() {
             </motion.div>
           )}
         </AnimatePresence>
-      </div>
-    </motion.div>
+      </motion.div>
+    </div>
   );
 }
