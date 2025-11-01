@@ -63,7 +63,7 @@ export default function ButtonBar() {
         )}
         {secondaryLabel && (
           <button
-            className="flex-1 rounded-lg bg-gray-200 text-gray-900 py-3 text-sm font-medium shadow-md border border-gray-300"
+            className="flex-1 rounded-lg bg-red-200 text-gray-900 py-3 text-sm font-medium shadow-md border border-gray-300"
             onClick={onSecondary}
           >
             {secondaryLabel}
