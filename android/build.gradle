@@ -7,7 +7,7 @@ buildscript {
     }
     dependencies {
         // Android build tools
-        classpath 'com.android.tools.build:gradle:8.1.1'
+        classpath 'com.android.tools.build:gradle:8.4.2'
         // ✅ Kotlin plugin – required for Capacitor plugins that use Kotlin
         classpath "org.jetbrains.kotlin:kotlin-gradle-plugin:1.9.24"
         // (Optional) Google services – only needed if you use Firebase etc.
