@@ -26,24 +26,15 @@ jobs:
           npm install
           npm run build
 
-      - name: Install Capacitor
-        run: npm install @capacitor/core @capacitor/cli @capacitor/android
+      - name: Install Capacitor Android
+        run: |
+          npm install @capacitor/core @capacitor/cli @capacitor/android
+          npx cap sync android
 
-      - name: Sync Capacitor
-        run: npx cap sync
-
-      - name: Setup Java
-        uses: actions/setup-java@v4
-        with:
-          distribution: temurin
-          java-version: 17
-
-      - name: Setup Android SDK
-        uses: android-actions/setup-android@v3
-
+      # ✅ Uses preinstalled SDK + Java; no license or install problems
       - name: Build Debug APK
         working-directory: android
-        run: ./gradlew assembleDebug
+        run: ./gradlew assembleDebug --no-daemon
 
       - name: Upload APK
         uses: actions/upload-artifact@v4
