@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useRef, useState } from 'react';
-import { haptics as baseHaptics } from '@/utils/haptics';
+import { Haptics, ImpactStyle } from '@capacitor/haptics';
 import { logRide } from '@/utils/logRide';
 
 // --- Helper: Calculate distance in meters between two lat/lng points ---
@@ -47,14 +47,45 @@ export default function RideController() {
   const lastPointRef = useRef<[number, number] | null>(null);
   const wasIdleRef = useRef(false);
 
-  // 🔹 Haptics setup
-  const haptics = {
-    startRide: baseHaptics.startRide ?? (() => navigator.vibrate?.(100)),
-    endRide: baseHaptics.endRide ?? (() => navigator.vibrate?.([80, 40, 80])),
-    idle: baseHaptics.idle ?? (() => navigator.vibrate?.(50)),
-    pickupStart: (baseHaptics as any).pickupStart ?? (() => navigator.vibrate?.(100)),
-    abortPickup: (baseHaptics as any).abortPickup ?? (() => navigator.vibrate?.([80, 80, 80])),
-  };
+// ✅ Cross-platform haptics (Capacitor + browser fallback)
+const haptics = {
+  startRide: async () => {
+    try {
+      await Haptics.impact({ style: ImpactStyle.Medium });
+    } catch {
+      navigator.vibrate?.(100);
+    }
+  },
+  endRide: async () => {
+    try {
+      // Use literal instead of enum for older plugin versions
+      await Haptics.notification({ type: 'success' as any });
+    } catch {
+      navigator.vibrate?.([80, 40, 80]);
+    }
+  },
+  idle: async () => {
+    try {
+      await Haptics.impact({ style: ImpactStyle.Light });
+    } catch {
+      navigator.vibrate?.(50);
+    }
+  },
+  pickupStart: async () => {
+    try {
+      await Haptics.impact({ style: ImpactStyle.Heavy });
+    } catch {
+      navigator.vibrate?.(100);
+    }
+  },
+  abortPickup: async () => {
+    try {
+      await Haptics.notification({ type: 'error' as any });
+    } catch {
+      navigator.vibrate?.([80, 80, 80]);
+    }
+  },
+};
 
   // --- ⏱ Update every second ---
   useEffect(() => {
