@@ -20,6 +20,25 @@
 # production
 /build
 
+# Capacitor native projects
+/android/
+ /ios/
+ /capacitor.config.json.backup*
+
+# Gradle / Android build artifacts
+.gradle/
+*.apk
+*.aab
+*.keystore
+local.properties
+
+# Xcode / iOS build artifacts
+DerivedData/
+Pods/
+*.xcworkspace
+*.xcuserdatad
+*.xcuserstate
+
 # misc
 .DS_Store
 *.pem
@@ -32,6 +51,7 @@ yarn-error.log*
 
 # env files (can opt-in for committing if needed)
 .env*
+!.env.example
 
 # vercel
 .vercel
