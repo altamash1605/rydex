@@ -26,14 +26,10 @@ android {
         }
     }
 
-    // ✅ Added section to fix Java compatibility for GitHub Actions / Codespaces
+    // ✅ Java 17 compatibility for GitHub Actions
     compileOptions {
         sourceCompatibility JavaVersion.VERSION_17
         targetCompatibility JavaVersion.VERSION_17
-    }
-
-    kotlinOptions {
-        jvmTarget = "17"
     }
 }
 
