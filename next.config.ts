@@ -1,11 +1,9 @@
 import type { NextConfig } from 'next';
 
 const nextConfig: NextConfig = {
-  turbopack: {},  // keep this so Turbopack doesn’t complain
+  turbopack: {}, // keep this so Turbopack is happy
   output: 'export',
-  images: {
-    unoptimized: true,
-  },
+  images: { unoptimized: true },
 };
 
 export default nextConfig;
