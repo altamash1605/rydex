@@ -1,23 +1,29 @@
-// Top-level build file for your Android project
+// Top-level build file where you can add configuration options common to all sub-projects/modules.
 
 buildscript {
+    
     repositories {
         google()
         mavenCentral()
     }
     dependencies {
-        // Android build tools
-        classpath 'com.android.tools.build:gradle:8.4.2'
-        // ✅ Kotlin plugin – required for Capacitor plugins that use Kotlin
-        classpath "org.jetbrains.kotlin:kotlin-gradle-plugin:1.9.24"
-        // (Optional) Google services – only needed if you use Firebase etc.
-        classpath 'com.google.gms:google-services:4.3.15'
+        classpath 'com.android.tools.build:gradle:8.7.2'
+        classpath 'com.google.gms:google-services:4.4.2'
+
+        // NOTE: Do not place your application dependencies here; they belong
+        // in the individual module build.gradle files
     }
 }
+
+apply from: "variables.gradle"
 
 allprojects {
     repositories {
         google()
         mavenCentral()
     }
+}
+
+task clean(type: Delete) {
+    delete rootProject.buildDir
 }
