@@ -41,17 +41,25 @@ export default function MapView() {
       setLowAccuracy(acc > 20);
     };
 
+    let watchId: string | null = null;
+
     if (Capacitor.isNativePlatform()) {
-      const watch = Geolocation.watchPosition(
+      // 👇 Await watch ID properly
+      Geolocation.watchPosition(
         { enableHighAccuracy: true, timeout: 30000, maximumAge: 0 },
         (pos, err) => {
           if (err || !pos) return console.warn('Native GPS error', err);
           const { latitude, longitude, accuracy } = pos.coords;
           handlePos(latitude, longitude, accuracy);
         }
-      );
+      ).then((id) => {
+        watchId = id;
+      });
+
       return () => {
-        if (watch) Geolocation.clearWatch({ id: watch });
+        if (watchId) {
+          Geolocation.clearWatch({ id: watchId });
+        }
       };
     } else {
       const watch = navigator.geolocation.watchPosition(
@@ -72,8 +80,12 @@ export default function MapView() {
     const loop = () => {
       if (mapRef.current && pos) {
         const pt = mapRef.current.latLngToContainerPoint(L.latLng(pos[0], pos[1]));
-        if (dotRef.current) dotRef.current.style.transform = `translate(${pt.x - 10}px, ${pt.y - 10}px)`;
-        if (isFollowing) mapRef.current.panTo(pos, { animate: true });
+        if (dotRef.current) {
+          dotRef.current.style.transform = `translate(${pt.x - 10}px, ${pt.y - 10}px)`;
+        }
+        if (isFollowing) {
+          mapRef.current.panTo(pos, { animate: true });
+        }
       }
       raf = requestAnimationFrame(loop);
     };
