@@ -1,7 +1,6 @@
 'use client';
 
 import { useEffect, useRef, useState } from 'react';
-import { Haptics, ImpactStyle } from '@capacitor/haptics';
 import { logRide } from '@/utils/logRide';
 
 // --- Helper: Calculate distance in meters between two lat/lng points ---
@@ -19,6 +18,30 @@ function haversineM(a: [number, number], b: [number, number]) {
 }
 
 type RidePhase = 'idle' | 'toPickup' | 'riding';
+
+// --- ✅ Cross-platform haptics helper ---
+async function triggerHaptic(type: 'light' | 'medium' | 'heavy' | 'success' | 'error' = 'medium') {
+  try {
+    // Dynamic import so it only loads on native build
+    const { Haptics, ImpactStyle } = await import('@capacitor/haptics');
+
+    if (type === 'success' || type === 'error') {
+      await Haptics.notification({ type });
+    } else {
+      const styleMap = {
+        light: ImpactStyle.Light,
+        medium: ImpactStyle.Medium,
+        heavy: ImpactStyle.Heavy,
+      };
+      await Haptics.impact({ style: styleMap[type] });
+    }
+  } catch {
+    // Web fallback
+    if (type === 'error') navigator.vibrate?.([80, 80, 80]);
+    else if (type === 'success') navigator.vibrate?.([80, 40, 80]);
+    else navigator.vibrate?.(80);
+  }
+}
 
 // --- Component ---
 export default function RideController() {
@@ -46,46 +69,6 @@ export default function RideController() {
   const watchIdRef = useRef<number | null>(null);
   const lastPointRef = useRef<[number, number] | null>(null);
   const wasIdleRef = useRef(false);
-
-// ✅ Cross-platform haptics (Capacitor + browser fallback)
-const haptics = {
-  startRide: async () => {
-    try {
-      await Haptics.impact({ style: ImpactStyle.Medium });
-    } catch {
-      navigator.vibrate?.(100);
-    }
-  },
-  endRide: async () => {
-    try {
-      // Use literal instead of enum for older plugin versions
-      await Haptics.notification({ type: 'success' as any });
-    } catch {
-      navigator.vibrate?.([80, 40, 80]);
-    }
-  },
-  idle: async () => {
-    try {
-      await Haptics.impact({ style: ImpactStyle.Light });
-    } catch {
-      navigator.vibrate?.(50);
-    }
-  },
-  pickupStart: async () => {
-    try {
-      await Haptics.impact({ style: ImpactStyle.Heavy });
-    } catch {
-      navigator.vibrate?.(100);
-    }
-  },
-  abortPickup: async () => {
-    try {
-      await Haptics.notification({ type: 'error' as any });
-    } catch {
-      navigator.vibrate?.([80, 80, 80]);
-    }
-  },
-};
 
   // --- ⏱ Update every second ---
   useEffect(() => {
@@ -121,7 +104,7 @@ const haptics = {
       setIdleSec(secs);
 
       if (!wasIdleRef.current) {
-        haptics.idle?.();
+        triggerHaptic('light');
         wasIdleRef.current = true;
 
         // Log first idle entry
@@ -158,7 +141,7 @@ const haptics = {
       setPickupSec(0);
       setIdle(false);
       setIdleStartAt(null);
-      haptics.pickupStart?.();
+      triggerHaptic('heavy');
 
       logRide({
         phase: 'toPickup',
@@ -176,7 +159,7 @@ const haptics = {
       setPickupStartAt(null);
       setPickupSec(0);
       setIdleStartAt(Date.now() + 15000);
-      haptics.abortPickup?.();
+      triggerHaptic('error');
 
       logRide({
         phase: 'idle',
@@ -196,7 +179,7 @@ const haptics = {
       setDistanceM(0);
       setPoints([]);
       lastPointRef.current = null;
-      haptics.startRide?.();
+      triggerHaptic('medium');
 
       logRide({
         phase: 'riding',
@@ -255,7 +238,7 @@ const haptics = {
       setIdleStartAt(Date.now() + 15000);
       setIdleSec(0);
       wasIdleRef.current = false;
-      haptics.endRide?.();
+      triggerHaptic('success');
 
       // Stop GPS tracking
       if (watchIdRef.current != null) {
