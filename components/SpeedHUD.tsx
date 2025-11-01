@@ -100,7 +100,7 @@ export default function SpeedHUD() {
 
   return (
     <div
-      className="absolute bottom-24 md:bottom-12 left-1/2 z-20 pointer-events-none"
+      className="absolute bottom-12 md:bottom-8 left-1/2 z-20 pointer-events-none"
       style={{ transform: 'translateX(-50%)' }}
     >
       <motion.div
