@@ -18,6 +18,13 @@ jobs:
         with:
           node-version: 20
 
+      # 🟩 Add this step to pin Java to version 17
+      - name: Set up Java 17
+        uses: actions/setup-java@v3
+        with:
+          distribution: 'temurin'
+          java-version: '17'
+
       - name: Install dependencies and build web app
         env:
           NEXT_PUBLIC_SUPABASE_URL: ${{ secrets.NEXT_PUBLIC_SUPABASE_URL }}
@@ -31,7 +38,6 @@ jobs:
           npm install @capacitor/core @capacitor/cli @capacitor/android
           npx cap sync android
 
-      # ✅ Uses preinstalled SDK + Java; no license or install problems
       - name: Build Debug APK
         working-directory: android
         run: ./gradlew assembleDebug --no-daemon
