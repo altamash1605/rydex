@@ -1,14 +1,19 @@
-// src/utils/haptics.ts
-export const Haptics = {
-  startRide: () => navigator.vibrate?.(100),
-  endRide: () => navigator.vibrate?.([50, 50, 150]),
-  short: () => navigator.vibrate?.(50),
-  long: () => navigator.vibrate?.(200),
-};
+import { Haptics, ImpactStyle } from '@capacitor/haptics';
 
-
+// Light tap
 export const haptics = {
-  startRide: () => navigator.vibrate?.([80, 40, 80]),
-  endRide: () => navigator.vibrate?.(200),
-  idle: () => navigator.vibrate?.(50),
+  tap: async () => {
+    try {
+      await Haptics.impact({ style: ImpactStyle.Light });
+    } catch (err) {
+      console.warn('Haptics not supported:', err);
+    }
+  },
+  heavy: async () => {
+    try {
+      await Haptics.impact({ style: ImpactStyle.Heavy });
+    } catch (err) {
+      console.warn('Haptics not supported:', err);
+    }
+  },
 };
