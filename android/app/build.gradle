@@ -1,20 +1,21 @@
 apply plugin: 'com.android.application'
-apply plugin: 'kotlin-android' // ✅ ensure Kotlin plugin is applied
+apply plugin: 'org.jetbrains.kotlin.android'  // ✅ this connects to the plugin we added above
 
 android {
     namespace "com.rydex.app"
-    compileSdk rootProject.ext.compileSdkVersion
+
+    // ✅ Tell Gradle exactly which Android SDK versions to use
+    compileSdkVersion 34
 
     defaultConfig {
         applicationId "com.rydex.app"
-        minSdkVersion rootProject.ext.minSdkVersion
-        targetSdkVersion rootProject.ext.targetSdkVersion
+        minSdkVersion 23
+        targetSdkVersion 34
         versionCode 1
         versionName "1.0"
         testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
 
         aaptOptions {
-            // Ignore hidden and VCS files during packaging
             ignoreAssetsPattern '!.svn:!.git:!.ds_store:!*.scc:.*:!CVS:!thumbs.db:!picasa.ini:!*~'
         }
     }
@@ -26,7 +27,7 @@ android {
         }
     }
 
-    // ✅ Align Java & Kotlin targets to prevent JVM mismatch
+    // ✅ Make Java + Kotlin use the same version (fixes previous JVM mismatch)
     compileOptions {
         sourceCompatibility JavaVersion.VERSION_17
         targetCompatibility JavaVersion.VERSION_17
@@ -35,13 +36,10 @@ android {
     kotlinOptions {
         jvmTarget = '17'
     }
-
-    // Optional but useful for CI environments
-    lintOptions {
-        checkReleaseBuilds false
-        abortOnError false
-    }
 }
+
+
+
 
 repositories {
     flatDir {
