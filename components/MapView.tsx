@@ -3,115 +3,129 @@
 import dynamic from 'next/dynamic';
 import { useEffect, useRef, useState } from 'react';
 import RecenterButton from './RecenterButton';
+import { useGeoTracker } from './useGeoTracker';
+import { useLeafletLayers } from './useLeafletLayers';
 import type { Map as LeafletMap } from 'leaflet';
 import L from 'leaflet';
-import { Capacitor } from '@capacitor/core';
-import { Geolocation } from '@capacitor/geolocation';
 import 'leaflet/dist/leaflet.css';
 
-const MapContainer = dynamic(() => import('react-leaflet').then((m) => m.MapContainer), { ssr: false });
-const TileLayer = dynamic(() => import('react-leaflet').then((m) => m.TileLayer), { ssr: false });
+const MapContainer = dynamic(() => import('react-leaflet').then(m => m.MapContainer), { ssr: false });
+const TileLayer   = dynamic(() => import('react-leaflet').then(m => m.TileLayer),   { ssr: false });
 const MapRefBinder = dynamic(() =>
-  import('react-leaflet').then((m) => ({
+  import('react-leaflet').then(m => ({
     default: function MapRefBinder({ onReady }: { onReady: (map: LeafletMap) => void }) {
       const map = m.useMapEvents({});
-      useEffect(() => {
-        if (map) onReady(map);
-      }, [map, onReady]);
+      useEffect(() => { if (map) onReady(map); return undefined; }, [map, onReady]);
       return null;
     },
   }))
 );
 
 export default function MapView() {
-  const mapRef = useRef<LeafletMap | null>(null);
-  const [path, setPath] = useState<[number, number][]>([]);
-  const [pos, setPos] = useState<[number, number] | null>(null);
-  const [accuracy, setAccuracy] = useState<number | null>(null);
-  const [lowAccuracy, setLowAccuracy] = useState(false);
+  const { path, currentPos } = useGeoTracker();
+  const { initLayers, updatePath, mapRef } = useLeafletLayers();
+
   const [isFollowing, setIsFollowing] = useState(true);
+  const [lowAccuracy, setLowAccuracy] = useState(false);
+  const [accuracyValue, setAccuracyValue] = useState<number | null>(null);
+
   const dotRef = useRef<HTMLDivElement | null>(null);
 
-  // --- get GPS updates ---
-  useEffect(() => {
-    const handlePos = (lat: number, lng: number, acc: number) => {
-      setPos([lat, lng]);
-      setPath((arr) => [...arr, [lat, lng]]);
-      setAccuracy(acc);
-      setLowAccuracy(acc > 20);
-    };
-
-    let watchId: string | null = null;
-
-    if (Capacitor.isNativePlatform()) {
-      // 👇 Await watch ID properly
-      Geolocation.watchPosition(
-        { enableHighAccuracy: true, timeout: 30000, maximumAge: 0 },
-        (pos, err) => {
-          if (err || !pos) return console.warn('Native GPS error', err);
-          const { latitude, longitude, accuracy } = pos.coords;
-          handlePos(latitude, longitude, accuracy);
-        }
-      ).then((id) => {
-        watchId = id;
-      });
-
-      return () => {
-        if (watchId) {
-          Geolocation.clearWatch({ id: watchId });
-        }
-      };
-    } else {
-      const watch = navigator.geolocation.watchPosition(
-        (pos) => {
-          const { latitude, longitude, accuracy } = pos.coords;
-          handlePos(latitude, longitude, accuracy);
-        },
-        (err) => console.warn('Browser GPS error', err),
-        { enableHighAccuracy: true, timeout: 30000, maximumAge: 0 }
-      );
-      return () => navigator.geolocation.clearWatch(watch);
-    }
-  }, []);
-
-  // --- Animate blue dot and follow ---
+  // --- Animate / update every frame ---
   useEffect(() => {
     let raf: number;
     const loop = () => {
-      if (mapRef.current && pos) {
-        const pt = mapRef.current.latLngToContainerPoint(L.latLng(pos[0], pos[1]));
+      const pos = currentPos.current;
+      const map = mapRef.current;
+      if (pos && map) {
+        const pt = map.latLngToContainerPoint(L.latLng(pos[0], pos[1]));
         if (dotRef.current) {
           dotRef.current.style.transform = `translate(${pt.x - 10}px, ${pt.y - 10}px)`;
         }
+
+        updatePath(pos);
+
         if (isFollowing) {
-          mapRef.current.panTo(pos, { animate: true });
+          map.panTo(pos, { animate: true, duration: 0.8 });
         }
       }
       raf = requestAnimationFrame(loop);
     };
     raf = requestAnimationFrame(loop);
     return () => cancelAnimationFrame(raf);
-  }, [pos, isFollowing]);
+  }, [updatePath, currentPos, isFollowing]);
 
+  // --- Handle Recenter button click ---
   const handleRecenter = () => {
-    if (mapRef.current && pos) {
-      mapRef.current.flyTo(pos, mapRef.current.getZoom(), { animate: true });
+    const map = mapRef.current;
+    const pos = currentPos.current;
+    if (map && pos) {
+      map.flyTo(pos, map.getZoom(), { animate: true, duration: 0.8 });
       setIsFollowing(true);
+      console.log('✅ Recenter enabled');
     }
   };
+
+  // --- Disable follow when user manually pans or zooms ---
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map) return;
+
+    const stopFollow = () => {
+      if (isFollowing) {
+        setIsFollowing(false);
+        console.log('🛑 Follow paused — user moved map manually');
+      }
+    };
+
+    map.on('dragstart', stopFollow);
+    map.on('zoomstart', stopFollow);
+    map.on('movestart', stopFollow);
+
+    return () => {
+      map.off('dragstart', stopFollow);
+      map.off('zoomstart', stopFollow);
+      map.off('movestart', stopFollow);
+    };
+  }, [mapRef.current, isFollowing]);
+
+  // --- Track GPS accuracy ---
+  useEffect(() => {
+    if (typeof navigator === 'undefined') return;
+
+    const watch = navigator.geolocation.watchPosition(
+      (pos) => {
+        const acc = pos.coords.accuracy;
+        setAccuracyValue(acc);
+        setLowAccuracy(acc > 20);
+      },
+      (err) => console.warn('Accuracy watch error:', err),
+      { enableHighAccuracy: true, timeout: 15000, maximumAge: 0 }
+    );
+
+    return () => navigator.geolocation.clearWatch(watch);
+  }, []);
+
+  const center = path[path.length - 1] ?? [0, 0];
 
   return (
     <div className="relative h-full w-full">
       <div className="absolute inset-0">
         <MapContainer
-          center={pos ?? [0, 0]}
+          center={center as [number, number]}
           zoom={15}
           zoomControl={false}
           attributionControl={false}
           className="h-full w-full"
+          doubleClickZoom
+          scrollWheelZoom
+          dragging
         >
-          <MapRefBinder onReady={(m) => (mapRef.current = m)} />
-          <TileLayer url="https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png" />
+          <MapRefBinder onReady={initLayers} />
+          <TileLayer
+            attribution='&copy; <a href="https://carto.com/">CARTO</a>'
+            url="https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png"
+          />
         </MapContainer>
       </div>
 
@@ -119,12 +133,14 @@ export default function MapView() {
         ref={dotRef}
         className="absolute z-[999] w-5 h-5 rounded-full bg-blue-500 border-[3px] border-white shadow-lg pointer-events-none transition-transform duration-75 ease-out"
       />
+
       {lowAccuracy && (
         <div className="absolute bottom-24 left-1/2 -translate-x-1/2 bg-blue-600 text-white px-4 py-2 rounded-xl shadow-lg text-sm animate-pulse">
-          GPS accuracy low ({accuracy?.toFixed(0)} m)
+          GPS accuracy low ({accuracyValue?.toFixed(0)} m)
         </div>
       )}
-      <RecenterButton onClick={handleRecenter} visible />
+
+      <RecenterButton onClick={handleRecenter} visible={true} />
     </div>
   );
 }
