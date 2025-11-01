@@ -2,24 +2,31 @@
 
 import { useEffect } from 'react';
 
-export default function GeoPermissionWrapper({
-  children,
-}: {
-  children: React.ReactNode;
-}) {
+export default function GeoPermissionWrapper({ children }: { children: React.ReactNode }) {
   useEffect(() => {
-    if ('permissions' in navigator) {
-      navigator.permissions
-        .query({ name: 'geolocation' })
-        .then((res) => {
-          if (res.state === 'denied') {
-            alert('⚠️ Please enable precise GPS access in browser settings for better accuracy.');
-          } else {
-            console.log('🛰️ Geolocation permission:', res.state);
+    async function ensurePermission() {
+      try {
+        // ✅ Try requesting high-accuracy permission
+        if ('permissions' in navigator) {
+          const status = await navigator.permissions.query({ name: 'geolocation' });
+          console.log('🛰️ Geolocation permission:', status.state);
+
+          if (status.state === 'denied') {
+            alert('⚠️ Please enable precise GPS in your phone settings for better accuracy.');
           }
-        })
-        .catch((err) => console.warn('Permission check failed:', err));
+        }
+
+        // ✅ Prompt browser to request precise location immediately
+        navigator.geolocation.getCurrentPosition(
+          (pos) => console.log('📍 Initial GPS fix', pos.coords.accuracy, 'm'),
+          (err) => console.warn('Permission request error:', err),
+          { enableHighAccuracy: true, timeout: 10000 }
+        );
+      } catch (err) {
+        console.warn('Permission setup failed:', err);
+      }
     }
+    ensurePermission();
   }, []);
 
   return <>{children}</>;

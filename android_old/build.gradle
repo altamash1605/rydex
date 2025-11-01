@@ -1,0 +1,23 @@
+// Top-level build file for your Android project
+
+buildscript {
+    repositories {
+        google()
+        mavenCentral()
+    }
+    dependencies {
+        // Android build tools
+        classpath 'com.android.tools.build:gradle:8.4.2'
+        // ✅ Kotlin plugin – required for Capacitor plugins that use Kotlin
+        classpath "org.jetbrains.kotlin:kotlin-gradle-plugin:1.9.24"
+        // (Optional) Google services – only needed if you use Firebase etc.
+        classpath 'com.google.gms:google-services:4.3.15'
+    }
+}
+
+allprojects {
+    repositories {
+        google()
+        mavenCentral()
+    }
+}
