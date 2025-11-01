@@ -17,35 +17,36 @@ export default function RecenterButton({ onClick, visible = true }: Props) {
     console.log('🧭 Recenter button clicked!');
     setClicked(true);
 
-    // 🔹 Fire a global event so MapView can recenter
+    // 🔹 Fire global event so MapView can recenter
     window.dispatchEvent(new CustomEvent('rydex-recenter'));
 
-    // 🔹 Support any local click handler (backward compatible)
     if (onClick) onClick();
 
-    // Reset visual state
     setTimeout(() => setClicked(false), 300);
   };
 
   return (
-    <button
-      onClick={handleClick}
+    <div
       style={{
-        position: 'fixed',
+        position: 'absolute',          // ✅ anchor within map wrapper
         bottom: '20px',
-        left: '20px',
-        zIndex: 999999,
-        background: clicked ? '#cce5ff' : 'white',
-        border: '2px solid #444',
-        borderRadius: '50%',
-        padding: '12px',
-        boxShadow: '0 2px 10px rgba(0,0,0,0.3)',
-        cursor: 'pointer',
+        right: '20px',                 // ✅ moved to bottom-right corner (safer on mobile)
+        zIndex: 9999999,               // ✅ always on top
         pointerEvents: 'auto',
       }}
-      title="Recenter map"
+      className="pointer-events-auto"
     >
-      <Crosshair className="w-6 h-6 text-gray-700" />
-    </button>
+      <button
+        onClick={handleClick}
+        className="bg-white rounded-full border-2 border-gray-700 shadow-lg p-3 hover:bg-gray-100 active:scale-95 transition-all"
+        style={{
+          boxShadow: '0 3px 12px rgba(0,0,0,0.35)',
+          background: clicked ? '#cce5ff' : 'white',
+        }}
+        title="Recenter map"
+      >
+        <Crosshair className="w-6 h-6 text-gray-700" />
+      </button>
+    </div>
   );
 }
