@@ -86,7 +86,15 @@ export default function RideController() {
       if (!wasIdleRef.current) {
         triggerHaptic('light');
         wasIdleRef.current = true;
-        logRide({ phase: 'idle', lat: lastPointRef.current?.[0] ?? 0, lng: lastPointRef.current?.[1] ?? 0, speed: 0, idle_time: secs });
+        logRide({
+          phase: 'idle',
+          lat: lastPointRef.current?.[0] ?? 0,
+          lng: lastPointRef.current?.[1] ?? 0,
+          speed: 0,
+          distance: 0,
+          duration: secs,
+          idle_time: secs,
+        });
       }
     } else {
       setIdle(false);
@@ -173,7 +181,8 @@ export default function RideController() {
       setIdle(false);
       setIdleStartAt(null);
       triggerHaptic('heavy');
-      logRide({ phase: 'toPickup' });
+      const [lat, lng] = lastPointRef.current ?? [0, 0];
+      logRide({ phase: 'toPickup', lat, lng, speed: 0, distance: 0, duration: 0 });
     };
 
     const abortPickup = () => {
@@ -182,7 +191,8 @@ export default function RideController() {
       setPickupStartAt(null);
       setIdleStartAt(Date.now() + 15000);
       triggerHaptic('error');
-      logRide({ phase: 'idle' });
+      const [lat, lng] = lastPointRef.current ?? [0, 0];
+      logRide({ phase: 'idle', lat, lng, speed: 0, distance: 0, duration: 0 });
     };
 
     const startRide = async () => {
@@ -211,7 +221,8 @@ export default function RideController() {
         watchIdRef.current = null;
       }
       window.dispatchEvent(new CustomEvent('rydex-ride-finished', { detail: { rideStartAt, rideEndAt: Date.now(), distanceM, points } }));
-      logRide({ phase: 'idle', distance: distanceM, duration: rideSec });
+      const [lat, lng] = lastPointRef.current ?? [0, 0];
+      logRide({ phase: 'idle', lat, lng, speed: 0, distance: distanceM, duration: rideSec });
     };
 
     window.addEventListener('rydex-pickup-start', startPickup);
