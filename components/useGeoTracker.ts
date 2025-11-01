@@ -25,34 +25,43 @@ export function useGeoTracker() {
 
     async function startWatch() {
       try {
+        const handlePos = (latitude: number, longitude: number, accuracy: number) => {
+          // Ignore bad accuracy readings
+          if (accuracy > 20) return;
+          currentPos.current = [latitude, longitude];
+          // Avoid over-rendering by using functional state update
+          setPath((p) => {
+            const last = p[p.length - 1];
+            if (!last || Math.hypot(latitude - last[0], longitude - last[1]) > 0.00001) {
+              return [...p, [latitude, longitude]];
+            }
+            return p;
+          });
+        };
+
         if (Geolocation) {
-          // ✅ Native (Capacitor) GPS tracking
+          // ✅ Native (Capacitor) GPS tracking with faster interval
           watchIdRef.current = await Geolocation.watchPosition(
-            { enableHighAccuracy: true, timeout: 10000, maximumAge: 0 },
+            { enableHighAccuracy: true, timeout: 1000, maximumAge: 0 },
             (pos: any, err: any) => {
               if (!isMounted) return;
-              if (err) {
-                console.warn('Capacitor GPS error:', err);
-                return;
-              }
+              if (err) return console.warn('Capacitor GPS error:', err);
               const { latitude, longitude, accuracy } = pos.coords;
-              currentPos.current = [latitude, longitude];
-              setPath((p) => [...p, [latitude, longitude]]);
+              handlePos(latitude, longitude, accuracy);
               console.log(`📍 [Native] ${latitude}, ${longitude} (±${accuracy} m)`);
             }
           );
         } else if ('geolocation' in navigator) {
-          // 🌐 Web fallback
+          // 🌐 Web fallback (same high-frequency config)
           watchIdRef.current = navigator.geolocation.watchPosition(
             (pos) => {
               if (!isMounted) return;
               const { latitude, longitude, accuracy } = pos.coords;
-              currentPos.current = [latitude, longitude];
-              setPath((p) => [...p, [latitude, longitude]]);
+              handlePos(latitude, longitude, accuracy);
               console.log(`🌍 [Web] ${latitude}, ${longitude} (±${accuracy} m)`);
             },
             (err) => console.warn('Web GPS error:', err),
-            { enableHighAccuracy: true, timeout: 10000, maximumAge: 0 }
+            { enableHighAccuracy: true, timeout: 1000, maximumAge: 0 }
           );
         } else {
           alert('Geolocation not supported on this device.');
@@ -66,7 +75,6 @@ export function useGeoTracker() {
 
     return () => {
       isMounted = false;
-      // Clear watch
       if (Geolocation && watchIdRef.current) {
         Geolocation.clearWatch({ id: watchIdRef.current });
       } else if (navigator.geolocation && watchIdRef.current) {

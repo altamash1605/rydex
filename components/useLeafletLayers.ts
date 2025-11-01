@@ -34,24 +34,39 @@ export function useLeafletLayers() {
     }
   };
 
-  const updateDot = (pos: [number, number]) => {
-    circleRef.current?.setLatLng(pos);
+  // 🔹 Smooth transition for marker
+  const moveMarkerSmooth = (from: [number, number], to: [number, number]) => {
+    let progress = 0;
+    const step = () => {
+      progress += 0.2;
+      const lat = from[0] + (to[0] - from[0]) * progress;
+      const lng = from[1] + (to[1] - from[1]) * progress;
+      circleRef.current?.setLatLng([lat, lng]);
+      if (progress < 1) requestAnimationFrame(step);
+    };
+    requestAnimationFrame(step);
   };
 
   const lastPathPoint = useRef<[number, number] | null>(null);
   const updatePath = (pos: [number, number]) => {
     const last = lastPathPoint.current;
     if (!polyRef.current) return;
-    if (!last || L.latLng(last).distanceTo(pos) > 2) {
+    if (!last) {
+      polyRef.current.addLatLng(pos);
+      lastPathPoint.current = pos;
+      return;
+    }
+    const dist = L.latLng(last).distanceTo(pos);
+    if (dist > 2) {
+      moveMarkerSmooth(last, pos);
       polyRef.current.addLatLng(pos);
       lastPathPoint.current = pos;
     }
   };
 
-  // ✅ Type-safe effect with explicit return type
-  useEffect((): void | (() => void) => {
+  useEffect(() => {
     const map = mapRef.current;
-    if (!map) return undefined; // make return type explicit
+    if (!map) return;
 
     const stopFollow = () => {
       followMarkerRef.current = false;
@@ -64,5 +79,5 @@ export function useLeafletLayers() {
     };
   }, []);
 
-  return { mapRef, initLayers, updateDot, updatePath, followMarkerRef, isUserPannedRef };
+  return { mapRef, initLayers, updatePath, followMarkerRef, isUserPannedRef };
 }
