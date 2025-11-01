@@ -1,12 +1,12 @@
 'use client';
 
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { haptics as baseHaptics } from '@/utils/haptics';
-import { logRide } from '@/utils/logRide'; // ✅ Added import
+import { logRide } from '@/utils/logRide';
 
-// --- helpers ---
+// --- Helper: Calculate distance in meters between two lat/lng points ---
 function haversineM(a: [number, number], b: [number, number]) {
-  const R = 6371000;
+  const R = 6371000; // Earth radius (m)
   const toRad = (d: number) => (d * Math.PI) / 180;
   const dLat = toRad(b[0] - a[0]);
   const dLng = toRad(b[1] - a[1]);
@@ -20,39 +20,35 @@ function haversineM(a: [number, number], b: [number, number]) {
 
 type RidePhase = 'idle' | 'toPickup' | 'riding';
 
-// --- component ---
+// --- Component ---
 export default function RideController() {
+  // 🔹 Ride phase tracking
   const [phase, setPhase] = useState<RidePhase>('idle');
 
+  // 🔹 Pickup tracking
   const [pickupStartAt, setPickupStartAt] = useState<number | null>(null);
   const [pickupSec, setPickupSec] = useState(0);
 
+  // 🔹 Ride tracking
   const [rideStartAt, setRideStartAt] = useState<number | null>(null);
   const [rideEndAt, setRideEndAt] = useState<number | null>(null);
   const [rideSec, setRideSec] = useState(0);
-
   const [distanceM, setDistanceM] = useState(0);
   const [points, setPoints] = useState<[number, number][]>([]);
 
+  // 🔹 Idle state tracking
   const [idle, setIdle] = useState(true);
-  const [idleStartAt, setIdleStartAt] = useState<number | null>(
-    Date.now() + 15000
-  );
+  const [idleStartAt, setIdleStartAt] = useState<number | null>(Date.now() + 15000);
   const [idleSec, setIdleSec] = useState(0);
 
+  // 🔹 Internal trackers
   const [now, setNow] = useState(Date.now());
   const watchIdRef = useRef<number | null>(null);
   const lastPointRef = useRef<[number, number] | null>(null);
   const wasIdleRef = useRef(false);
 
-  // 🔹 full haptics definition (explicit type)
-  const haptics: {
-    startRide: () => any;
-    endRide: () => any;
-    idle: () => any;
-    pickupStart: () => any;
-    abortPickup: () => any;
-  } = {
+  // 🔹 Haptics setup
+  const haptics = {
     startRide: baseHaptics.startRide ?? (() => navigator.vibrate?.(100)),
     endRide: baseHaptics.endRide ?? (() => navigator.vibrate?.([80, 40, 80])),
     idle: baseHaptics.idle ?? (() => navigator.vibrate?.(50)),
@@ -60,13 +56,13 @@ export default function RideController() {
     abortPickup: (baseHaptics as any).abortPickup ?? (() => navigator.vibrate?.([80, 80, 80])),
   };
 
-  // 🔹 Tick every second
+  // --- ⏱ Update every second ---
   useEffect(() => {
     const t = setInterval(() => setNow(Date.now()), 1000);
     return () => clearInterval(t);
   }, []);
 
-  // 🔹 Timers per phase
+  // --- 🧮 Update ride/pickup timers ---
   useEffect(() => {
     if (phase === 'toPickup' && pickupStartAt)
       setPickupSec(Math.floor((now - pickupStartAt) / 1000));
@@ -74,7 +70,7 @@ export default function RideController() {
       setRideSec(Math.floor(((rideEndAt ?? now) - rideStartAt) / 1000));
   }, [now, phase, pickupStartAt, rideStartAt, rideEndAt]);
 
-  // 🔹 Idle logic
+  // --- 💤 Idle tracking logic ---
   useEffect(() => {
     if (phase !== 'idle') {
       setIdle(false);
@@ -92,11 +88,12 @@ export default function RideController() {
       const secs = Math.floor((now - idleStartAt) / 1000);
       setIdle(true);
       setIdleSec(secs);
+
       if (!wasIdleRef.current) {
-        haptics.idle?.() ?? navigator.vibrate?.(50);
+        haptics.idle?.();
         wasIdleRef.current = true;
 
-        // ✅ Log when entering idle phase
+        // Log first idle entry
         logRide({
           phase: 'idle',
           lat: lastPointRef.current?.[0] ?? 0,
@@ -111,25 +108,18 @@ export default function RideController() {
     }
   }, [phase, now, idleStartAt]);
 
-  // 🔹 Broadcast stats
+  // --- 📡 Broadcast current ride stats globally ---
   useEffect(() => {
     window.dispatchEvent(
       new CustomEvent('rydex-ride-stats', {
-        detail: {
-          phase,
-          idle,
-          idleSec,
-          pickupSec,
-          rideSec,
-          distanceM,
-          points,
-        },
+        detail: { phase, idle, idleSec, pickupSec, rideSec, distanceM, points },
       })
     );
   }, [phase, idle, idleSec, pickupSec, rideSec, distanceM, points]);
 
-  // --- Phase event handlers ---
+  // --- ⚙️ Main event listeners (pickup / ride / abort) ---
   useEffect(() => {
+    /** 🟢 Begin pickup phase */
     const startPickup = () => {
       if (phase !== 'idle') return;
       setPhase('toPickup');
@@ -137,9 +127,8 @@ export default function RideController() {
       setPickupSec(0);
       setIdle(false);
       setIdleStartAt(null);
-      haptics.pickupStart?.() ?? navigator.vibrate?.(100);
+      haptics.pickupStart?.();
 
-      // ✅ Log pickup start
       logRide({
         phase: 'toPickup',
         lat: lastPointRef.current?.[0] ?? 0,
@@ -149,15 +138,15 @@ export default function RideController() {
       });
     };
 
+    /** 🔴 Abort pickup */
     const abortPickup = () => {
       if (phase !== 'toPickup') return;
       setPhase('idle');
       setPickupStartAt(null);
       setPickupSec(0);
       setIdleStartAt(Date.now() + 15000);
-      haptics.abortPickup?.() ?? navigator.vibrate?.([80, 80, 80]);
+      haptics.abortPickup?.();
 
-      // ✅ Log pickup abort
       logRide({
         phase: 'idle',
         lat: lastPointRef.current?.[0] ?? 0,
@@ -166,6 +155,7 @@ export default function RideController() {
       });
     };
 
+    /** 🚀 Start ride phase */
     const startRide = () => {
       if (phase !== 'toPickup') return;
       setPhase('riding');
@@ -175,9 +165,8 @@ export default function RideController() {
       setDistanceM(0);
       setPoints([]);
       lastPointRef.current = null;
-      haptics.startRide?.() ?? navigator.vibrate?.([80, 40, 80]);
+      haptics.startRide?.();
 
-      // ✅ Log ride start
       logRide({
         phase: 'riding',
         lat: lastPointRef.current?.[0] ?? 0,
@@ -187,37 +176,47 @@ export default function RideController() {
         duration: 0,
       });
 
-      // Start GPS
+      // --- 📡 Start continuous GPS tracking ---
       if (navigator.geolocation) {
         watchIdRef.current = navigator.geolocation.watchPosition(
           async (pos) => {
-            const p: [number, number] = [
-              pos.coords.latitude,
-              pos.coords.longitude,
-            ];
+            const { latitude, longitude, accuracy, speed } = pos.coords;
+
+            // ⚠️ Skip inaccurate fixes (>20 m)
+            if (accuracy > 20) {
+              console.warn('Skipping inaccurate GPS fix:', accuracy);
+              return;
+            }
+
+            const p: [number, number] = [latitude, longitude];
             setPoints((arr) => [...arr, p]);
+
+            // Compute incremental distance
             if (lastPointRef.current) {
               const d = haversineM(lastPointRef.current, p);
               if (d < 500) setDistanceM((m) => m + d);
             }
             lastPointRef.current = p;
 
-            // ✅ Log GPS update
+            console.log(`📍 GPS fix: ${latitude}, ${longitude} (±${accuracy}m)`);
+
+            // Log live GPS data to DB
             await logRide({
               phase: 'riding',
               lat: p[0],
               lng: p[1],
-              speed: pos.coords.speed ?? 0,
+              speed: speed ?? 0,
               distance: distanceM,
               duration: rideSec,
             });
           },
           (err) => console.warn('GPS error', err),
-          { enableHighAccuracy: true, timeout: 15000, maximumAge: 0 }
+          { enableHighAccuracy: true, timeout: 30000, maximumAge: 0 }
         );
       }
     };
 
+    /** 🏁 End ride phase */
     const endRide = () => {
       if (phase !== 'riding') return;
       setPhase('idle');
@@ -225,24 +224,19 @@ export default function RideController() {
       setIdleStartAt(Date.now() + 15000);
       setIdleSec(0);
       wasIdleRef.current = false;
-      haptics.endRide?.() ?? navigator.vibrate?.(200);
+      haptics.endRide?.();
 
+      // Stop GPS tracking
       if (watchIdRef.current != null) {
         navigator.geolocation.clearWatch(watchIdRef.current);
         watchIdRef.current = null;
       }
 
-      const payload = {
-        rideStartAt,
-        rideEndAt: Date.now(),
-        distanceM,
-        points,
-      };
-      window.dispatchEvent(
-        new CustomEvent('rydex-ride-finished', { detail: payload })
-      );
+      // Dispatch ride finished event
+      const payload = { rideStartAt, rideEndAt: Date.now(), distanceM, points };
+      window.dispatchEvent(new CustomEvent('rydex-ride-finished', { detail: payload }));
 
-      // ✅ Log ride end
+      // Log final ride summary
       logRide({
         phase: 'idle',
         lat: lastPointRef.current?.[0] ?? 0,
@@ -254,11 +248,13 @@ export default function RideController() {
       });
     };
 
+    // Attach event listeners
     window.addEventListener('rydex-pickup-start', startPickup);
     window.addEventListener('rydex-pickup-abort', abortPickup);
     window.addEventListener('rydex-ride-start', startRide);
     window.addEventListener('rydex-ride-end', endRide);
 
+    // Cleanup
     return () => {
       window.removeEventListener('rydex-pickup-start', startPickup);
       window.removeEventListener('rydex-pickup-abort', abortPickup);

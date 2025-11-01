@@ -24,7 +24,10 @@ const MapRefBinder = dynamic(() =>
 export default function MapView() {
   const { path, currentPos } = useGeoTracker();
   const { initLayers, updatePath, mapRef } = useLeafletLayers();
+
   const [isFollowing, setIsFollowing] = useState(true);
+  const [lowAccuracy, setLowAccuracy] = useState(false); // 👈 new state
+  const [accuracyValue, setAccuracyValue] = useState<number | null>(null);
 
   const dotRef = useRef<HTMLDivElement | null>(null);
 
@@ -65,24 +68,36 @@ export default function MapView() {
     }
   };
 
-// --- Pause follow when user manually pans ---
-useEffect((): void | (() => void) => {
-  const map = mapRef.current;
-  if (!map) return undefined; // wait until map exists
+  // --- Pause follow when user manually pans ---
+  useEffect((): void | (() => void) => {
+    const map = mapRef.current;
+    if (!map) return undefined;
 
-  const stopFollow = () => {
-    setIsFollowing(false);
-    console.log('🛑 Follow paused — user panned map');
-  };
+    const stopFollow = () => {
+      setIsFollowing(false);
+      console.log('🛑 Follow paused — user panned map');
+    };
 
-  // Attach once
-  map.on('dragstart', stopFollow);
+    map.on('dragstart', stopFollow);
+    return () => map.off('dragstart', stopFollow);
+  }, [mapRef.current]);
 
-  // Cleanup
-  return () => {
-    map.off('dragstart', stopFollow);
-  };
-}, [mapRef.current]); // ✅ depend on mapRef.current
+  // --- Track GPS accuracy from browser ---
+  useEffect(() => {
+    if (typeof navigator === 'undefined') return;
+
+    const watch = navigator.geolocation.watchPosition(
+      (pos) => {
+        const acc = pos.coords.accuracy;
+        setAccuracyValue(acc);
+        setLowAccuracy(acc > 20); // 👈 mark low accuracy
+      },
+      (err) => console.warn('Accuracy watch error:', err),
+      { enableHighAccuracy: true, timeout: 15000, maximumAge: 0 }
+    );
+
+    return () => navigator.geolocation.clearWatch(watch);
+  }, []);
 
   const center = path[path.length - 1] ?? [0, 0];
 
@@ -112,6 +127,13 @@ useEffect((): void | (() => void) => {
         ref={dotRef}
         className="absolute z-[999] w-5 h-5 rounded-full bg-blue-500 border-[3px] border-white shadow-lg pointer-events-none transition-transform duration-75 ease-out"
       />
+
+      {/* 🟦 Low-accuracy callout (shows only when accuracy > 20m) */}
+      {lowAccuracy && (
+        <div className="absolute bottom-24 left-1/2 -translate-x-1/2 bg-blue-600 text-white px-4 py-2 rounded-xl shadow-lg text-sm animate-pulse">
+          GPS accuracy low ({accuracyValue?.toFixed(0)} m)
+        </div>
+      )}
 
       <RecenterButton onClick={handleRecenter} visible={true} />
     </div>
