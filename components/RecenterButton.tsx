@@ -1,51 +1,43 @@
 'use client';
 
-import { useEffect, useState } from 'react';
-import { Crosshair } from 'lucide-react';
-import { createPortal } from 'react-dom';
+import { Map } from 'leaflet';
 
-type Props = {
-  onClick?: () => void;
-  visible?: boolean;
-};
+export default function RecenterButton({
+  mapRef,
+  setUserPanned,
+}: {
+  mapRef: React.MutableRefObject<Map | null>;
+  setUserPanned: (value: boolean) => void;
+}) {
+  const handleRecenter = () => {
+    const map = mapRef.current;
+    if (!map) return;
 
-export default function RecenterButton({ onClick, visible = true }: Props) {
-  const [mounted, setMounted] = useState(false);
-  const [clicked, setClicked] = useState(false);
-
-  useEffect(() => setMounted(true), []);
-
-  const handleClick = () => {
-    setClicked(true);
-    window.dispatchEvent(new CustomEvent('rydex-recenter'));
-    if (onClick) onClick?.();
-    setTimeout(() => setClicked(false), 300);
+    if (navigator.geolocation) {
+      navigator.geolocation.getCurrentPosition((pos) => {
+        map.setView([pos.coords.latitude, pos.coords.longitude], map.getZoom());
+        setUserPanned(false);
+      });
+    }
   };
 
-  if (!mounted || !visible) return null;
-
-  const button = (
+  return (
     <button
-      onClick={handleClick}
-      className={`
-        fixed bottom-6 right-6
-        z-[9999999]
-        bg-white text-gray-800
-        border-2 border-gray-700 rounded-full
-        p-3 shadow-lg
-        hover:bg-gray-100 active:scale-95
-        transition-all
-      `}
-      style={{
-        boxShadow: '0 3px 12px rgba(0,0,0,0.35)',
-        background: clicked ? '#cce5ff' : 'white',
-      }}
-      title="Recenter map"
+      onClick={handleRecenter}
+      className="bg-white shadow-lg rounded-full p-3 border border-gray-200 hover:bg-gray-100 active:scale-95 transition-all"
+      style={{ width: 48, height: 48 }}
     >
-      <Crosshair className="w-6 h-6" />
+      <svg
+        xmlns="http://www.w3.org/2000/svg"
+        fill="none"
+        viewBox="0 0 24 24"
+        strokeWidth={2}
+        stroke="black"
+        className="w-5 h-5 mx-auto"
+      >
+        <path strokeLinecap="round" strokeLinejoin="round" d="M12 6v6l4 2" />
+        <circle cx="12" cy="12" r="9" stroke="black" strokeWidth="2" fill="none" />
+      </svg>
     </button>
   );
-
-  // ✅ Render outside map so it's never affected by map transforms
-  return createPortal(button, document.body);
 }
