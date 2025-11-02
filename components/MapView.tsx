@@ -119,6 +119,113 @@ export default function MapView() {
   }, [path, mapReady]);
 
   useEffect(() => {
+    if (!mapReady) {
+      return;
+    }
+    const map = mapRef.current;
+    if (!map) {
+      return;
+    }
+
+    map.doubleClickZoom.disable();
+
+    const container = map.getContainer();
+    let lastTapTime = 0;
+    let gestureActive = false;
+    let initialY = 0;
+    let initialZoom = map.getZoom();
+    let draggingDisabledForGesture = false;
+    const sensitivity = 120;
+
+    const handleTouchStart = (event: TouchEvent) => {
+      if (event.touches.length !== 1) {
+        if (gestureActive && draggingDisabledForGesture && map.dragging && !map.dragging.enabled()) {
+          map.dragging.enable();
+        }
+        gestureActive = false;
+        draggingDisabledForGesture = false;
+        return;
+      }
+
+      const now = Date.now();
+      if (now - lastTapTime < 300) {
+        gestureActive = true;
+        initialY = event.touches[0].clientY;
+        initialZoom = map.getZoom();
+        if (map.dragging && map.dragging.enabled()) {
+          map.dragging.disable();
+          draggingDisabledForGesture = true;
+        } else {
+          draggingDisabledForGesture = false;
+        }
+        event.preventDefault();
+      } else {
+        gestureActive = false;
+        if (draggingDisabledForGesture && map.dragging && !map.dragging.enabled()) {
+          map.dragging.enable();
+        }
+        draggingDisabledForGesture = false;
+      }
+      lastTapTime = now;
+    };
+
+    const handleTouchMove = (event: TouchEvent) => {
+      if (!gestureActive || event.touches.length !== 1) {
+        return;
+      }
+      const touch = event.touches[0];
+      const deltaY = initialY - touch.clientY;
+      const zoomDelta = deltaY / sensitivity;
+      const targetZoom = initialZoom + zoomDelta;
+      const minZoom = map.getMinZoom();
+      const maxZoom = map.getMaxZoom();
+      const newZoom = Math.max(minZoom, Math.min(maxZoom, targetZoom));
+      if (!Number.isNaN(newZoom)) {
+        map.setZoom(newZoom, { animate: false });
+      }
+      event.preventDefault();
+    };
+
+    const handleTouchEnd = (event: TouchEvent) => {
+      if (!gestureActive) {
+        return;
+      }
+      gestureActive = false;
+      if (draggingDisabledForGesture && map.dragging && !map.dragging.enabled()) {
+        map.dragging.enable();
+      }
+      draggingDisabledForGesture = false;
+      event.preventDefault();
+    };
+
+    const handleTouchCancel = () => {
+      if (!gestureActive) {
+        return;
+      }
+      gestureActive = false;
+      if (draggingDisabledForGesture && map.dragging && !map.dragging.enabled()) {
+        map.dragging.enable();
+      }
+      draggingDisabledForGesture = false;
+    };
+
+    container.addEventListener('touchstart', handleTouchStart, { passive: false });
+    container.addEventListener('touchmove', handleTouchMove, { passive: false });
+    container.addEventListener('touchend', handleTouchEnd);
+    container.addEventListener('touchcancel', handleTouchCancel);
+
+    return () => {
+      container.removeEventListener('touchstart', handleTouchStart);
+      container.removeEventListener('touchmove', handleTouchMove);
+      container.removeEventListener('touchend', handleTouchEnd);
+      container.removeEventListener('touchcancel', handleTouchCancel);
+      if (draggingDisabledForGesture && map.dragging && !map.dragging.enabled()) {
+        map.dragging.enable();
+      }
+    };
+  }, [mapReady]);
+
+  useEffect(() => {
     return () => {
       if (programmaticResetTimeout.current) {
         window.clearTimeout(programmaticResetTimeout.current);
