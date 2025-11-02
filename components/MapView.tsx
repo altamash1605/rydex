@@ -53,7 +53,7 @@ export default function MapView() {
   const lng = currentPos.current?.[1] ?? 0;
 
   return (
-    <div className="relative h-full w-full overflow-hidden bg-[#f5f5f5]">
+    <div className="relative h-full w-full overflow-hidden bg-[#030712]">
       {/* Map layer */}
       <div className="absolute inset-0">
         <MapContainer
@@ -74,25 +74,35 @@ export default function MapView() {
         </MapContainer>
       </div>
 
-      {/* Soft lighting layer to match mock */}
-      <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_top,_rgba(255,255,255,0.35),_transparent_55%)]" />
+      {/* Atmospheric layers */}
+      <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_top,_rgba(80,112,255,0.28),_transparent_55%)]" />
+      <div className="pointer-events-none absolute inset-x-0 top-0 h-[32%] bg-[linear-gradient(180deg,rgba(3,7,18,0.72)_0%,rgba(3,7,18,0.15)_65%,rgba(3,7,18,0)_100%)]" />
+      <div className="pointer-events-none absolute inset-x-0 bottom-0 h-[55%] bg-[linear-gradient(180deg,rgba(3,7,18,0)_0%,rgba(3,7,18,0.55)_40%,rgba(3,7,18,0.92)_100%)]" />
 
       {/* --- Floating Overlays --- */}
 
       {/* Top HUD */}
-      <div className="rydex-overlay pointer-events-none absolute top-6 left-0 right-0 flex justify-center px-6">
-        <SpeedHUD />
+      <div
+        className="rydex-overlay pointer-events-none absolute inset-x-0 top-0 flex justify-center px-6"
+        style={{ paddingTop: 'calc(env(safe-area-inset-top, 1.5rem) + 1.5rem)' }}
+      >
+        <div className="pointer-events-auto w-full max-w-xl">
+          <SpeedHUD />
+        </div>
       </div>
 
       {/* Bottom Button */}
-      <div className="rydex-overlay rydex-overlay-bottom pointer-events-none absolute bottom-6 left-0 right-0 flex justify-center px-6">
-        <div className="pointer-events-auto w-full max-w-md">
+      <div
+        className="rydex-overlay rydex-overlay-bottom pointer-events-none absolute inset-x-0 bottom-0 flex justify-center px-6"
+        style={{ paddingBottom: 'calc(env(safe-area-inset-bottom, 1.5rem) + 1.75rem)' }}
+      >
+        <div className="pointer-events-auto w-full max-w-xl">
           <ButtonBar />
         </div>
       </div>
 
       {/* Recenter Button */}
-      <div className="rydex-overlay pointer-events-auto absolute bottom-36 right-6 hidden sm:block">
+      <div className="rydex-overlay pointer-events-auto absolute bottom-40 right-6 hidden sm:block">
         <RecenterButton mapRef={mapRef} setUserPanned={setUserPanned} />
       </div>
     </div>

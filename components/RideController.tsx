@@ -43,6 +43,8 @@ export default function RideController() {
   const [pickupSec, setPickupSec] = useState(0);
   const [rideSec, setRideSec] = useState(0);
   const [distanceM, setDistanceM] = useState(0);
+  const [speedMs, setSpeedMs] = useState(0);
+  const [accuracyM, setAccuracyM] = useState<number | null>(null);
   const [points, setPoints] = useState<[number, number][]>([]);
   const [idle, setIdle] = useState(true);
   const [idleStartAt, setIdleStartAt] = useState<number | null>(Date.now() + 15000);
@@ -104,10 +106,22 @@ export default function RideController() {
 
   // --- broadcast stats
   useEffect(() => {
-    window.dispatchEvent(new CustomEvent('rydex-ride-stats', {
-      detail: { phase, idle, idleSec, pickupSec, rideSec, distanceM, points },
-    }));
-  }, [phase, idle, idleSec, pickupSec, rideSec, distanceM, points]);
+    window.dispatchEvent(
+      new CustomEvent('rydex-ride-stats', {
+        detail: {
+          phase,
+          idle,
+          idleSec,
+          pickupSec,
+          rideSec,
+          distanceM,
+          points,
+          speedMs,
+          accuracyM,
+        },
+      })
+    );
+  }, [phase, idle, idleSec, pickupSec, rideSec, distanceM, points, speedMs, accuracyM]);
 
   // --- GPS tracking helpers
   const startNativeWatch = async () => {
@@ -121,6 +135,8 @@ export default function RideController() {
           if (accuracy > 50) return; // wait for lock
           const p: [number, number] = [latitude, longitude];
           setPoints((a) => [...a, p]);
+          setSpeedMs(speed && speed > 0 ? speed : 0);
+          setAccuracyM(typeof accuracy === 'number' ? accuracy : null);
 
           if (lastPointRef.current) {
             const d = haversineM(lastPointRef.current, p);
@@ -153,6 +169,8 @@ export default function RideController() {
         if (accuracy > 50) return;
         const p: [number, number] = [latitude, longitude];
         setPoints((a) => [...a, p]);
+        setSpeedMs(speed && speed > 0 ? speed : 0);
+        setAccuracyM(typeof accuracy === 'number' ? accuracy : null);
         if (lastPointRef.current) {
           const d = haversineM(lastPointRef.current, p);
           if (d < 500) setDistanceM((m) => m + d);
@@ -180,6 +198,8 @@ export default function RideController() {
       setPickupStartAt(Date.now());
       setIdle(false);
       setIdleStartAt(null);
+      setSpeedMs(0);
+      setAccuracyM(null);
       triggerHaptic('heavy');
       const [lat, lng] = lastPointRef.current ?? [0, 0];
       logRide({ phase: 'toPickup', lat, lng, speed: 0, distance: 0, duration: 0 });
@@ -204,6 +224,8 @@ export default function RideController() {
       setDistanceM(0);
       setPoints([]);
       lastPointRef.current = null;
+      setSpeedMs(0);
+      setAccuracyM(null);
       triggerHaptic('medium');
       if (Capacitor.isNativePlatform()) await startNativeWatch();
       else startBrowserWatch();
@@ -216,6 +238,8 @@ export default function RideController() {
       setIdleStartAt(Date.now() + 15000);
       setIdleSec(0);
       wasIdleRef.current = false;
+      setSpeedMs(0);
+      setAccuracyM(null);
       triggerHaptic('success');
       if (watchIdRef.current != null) {
         if (Capacitor.isNativePlatform()) Geolocation.clearWatch({ id: watchIdRef.current as string });
