@@ -61,22 +61,22 @@ export default function SpeedHUD() {
   const accuracyLabel = useMemo(() => formatAccuracy(stats.accuracyM), [stats.accuracyM]);
 
   return (
-    <div className="flex w-full flex-col gap-4 rounded-3xl border border-white/15 bg-slate-900/70 px-6 py-4 text-white shadow-[0_18px_45px_rgba(8,12,24,0.5)] backdrop-blur-xl sm:flex-row sm:items-center sm:justify-between sm:gap-6">
-      <div className="flex flex-col gap-2">
+    <div className="flex w-full flex-col gap-3 rounded-3xl border border-white/15 bg-slate-900/70 px-5 py-3 text-white shadow-[0_18px_45px_rgba(8,12,24,0.5)] backdrop-blur-xl sm:flex-row sm:items-center sm:justify-between sm:gap-5">
+      <div className="flex flex-col gap-1.5">
         <span className="text-[10px] font-semibold uppercase tracking-[0.45em] text-white/60">Speed</span>
         <div className="flex items-end gap-2 font-semibold">
-          <span className="text-5xl leading-none">{speedKmh != null ? speedKmh.toFixed(1) : '--.-'}</span>
-          <span className="text-xs uppercase tracking-[0.35em] text-white/50">km/h</span>
+          <span className="text-[2.75rem] leading-none">{speedKmh != null ? speedKmh.toFixed(1) : '--.-'}</span>
+          <span className="text-[11px] uppercase tracking-[0.3em] text-white/50">km/h</span>
         </div>
       </div>
-      <div className="flex flex-row justify-between gap-8 sm:flex-col sm:items-end sm:gap-2">
+      <div className="flex flex-row justify-between gap-7 sm:flex-col sm:items-end sm:gap-1.5">
         <div className="flex flex-col gap-1 text-left sm:text-right">
           <span className="text-[10px] uppercase tracking-[0.45em] text-white/50">Accuracy</span>
-          <span className="text-sm font-medium tracking-[0.2em] text-white/80">{accuracyLabel}</span>
+          <span className="text-[13px] font-medium tracking-[0.18em] text-white/80">{accuracyLabel}</span>
         </div>
         <div className="flex flex-col gap-1 text-left sm:text-right">
           <span className="text-[10px] uppercase tracking-[0.45em] text-white/50">Distance</span>
-          <span className="text-sm font-medium tracking-[0.2em] text-white/80">{distanceLabel}</span>
+          <span className="text-[13px] font-medium tracking-[0.18em] text-white/80">{distanceLabel}</span>
         </div>
       </div>
     </div>
