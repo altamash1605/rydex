@@ -1,7 +1,8 @@
 'use client';
 
+import { useEffect, useState } from 'react';
 import { Crosshair } from 'lucide-react';
-import { useState } from 'react';
+import { createPortal } from 'react-dom';
 
 type Props = {
   onClick?: () => void;
@@ -9,28 +10,31 @@ type Props = {
 };
 
 export default function RecenterButton({ onClick, visible = true }: Props) {
+  const [mounted, setMounted] = useState(false);
   const [clicked, setClicked] = useState(false);
 
-  if (!visible) return null;
+  useEffect(() => setMounted(true), []);
 
   const handleClick = () => {
+    console.log('🧭 Recenter clicked');
     setClicked(true);
     window.dispatchEvent(new CustomEvent('rydex-recenter'));
     if (onClick) onClick();
     setTimeout(() => setClicked(false), 300);
   };
 
-  return (
+  if (!mounted || !visible) return null;
+
+  const button = (
     <button
       onClick={handleClick}
       className={`
-        fixed                          /* ✅ use fixed so it's anchored to viewport */
-        bottom-6 right-6               /* ✅ visible in all devices */
-        z-[9999999]                    /* ✅ topmost layer */
+        fixed bottom-6 right-6
+        z-[9999999]
         bg-white text-gray-700 
         rounded-full border-2 border-gray-700 
-        shadow-lg p-3 
-        hover:bg-gray-100 active:scale-95 
+        shadow-lg p-3
+        hover:bg-gray-100 active:scale-95
         transition-all
       `}
       style={{
@@ -43,4 +47,7 @@ export default function RecenterButton({ onClick, visible = true }: Props) {
       <Crosshair className="w-6 h-6 text-gray-700" />
     </button>
   );
+
+  // ✅ Mount into body instead of inside map
+  return createPortal(button, document.body);
 }
