@@ -1,6 +1,6 @@
-import 'leaflet/dist/leaflet.css';
-
 'use client';
+
+import 'leaflet/dist/leaflet.css';
 
 import dynamic from 'next/dynamic';
 import { useEffect, useRef, useState } from 'react';
@@ -20,7 +20,7 @@ const Polyline = dynamic(() => import('react-leaflet').then(m => m.Polyline), { 
 export default function MapView() {
   const mapRef = useRef<LeafletMap | null>(null);
   const { currentPos, path } = useGeoTracker();
-  const leaflet = useLeafletLayers();
+  useLeafletLayers();
   const [userPanned, setUserPanned] = useState(false);
 
   const markerIcon = L.icon({
@@ -93,8 +93,8 @@ export default function MapView() {
 
       {/* Bottom Button */}
       <div
-        className="rydex-overlay rydex-overlay-bottom pointer-events-none absolute inset-x-0 bottom-0 flex justify-center px-6"
-        style={{ paddingBottom: 'calc(env(safe-area-inset-bottom, 1.5rem) + 1.75rem)' }}
+        className="rydex-overlay rydex-overlay-bottom pointer-events-none absolute inset-x-0 bottom-0 flex justify-center px-4 sm:px-6"
+        style={{ paddingBottom: 'calc(env(safe-area-inset-bottom, 1rem) + clamp(1rem, 4vw, 1.75rem))' }}
       >
         <div className="pointer-events-auto w-full max-w-xl">
           <ButtonBar />
