@@ -56,3 +56,42 @@ body {
     padding-bottom: env(safe-area-inset-bottom);
   }
 }
+
+/* Pulsing blue location marker */
+.pulsing-location-marker {
+  background: transparent;
+  border: none;
+}
+
+.pulsing-location-marker__inner {
+  display: block;
+  width: 18px;
+  height: 18px;
+  border-radius: 9999px;
+  background: radial-gradient(circle at center, rgba(59, 130, 246, 1) 40%, rgba(59, 130, 246, 0.65) 60%, rgba(59, 130, 246, 0) 70%);
+  position: relative;
+}
+
+.pulsing-location-marker__inner::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  background-color: rgba(59, 130, 246, 0.35);
+  animation: pulsing-location 2s ease-out infinite;
+}
+
+@keyframes pulsing-location {
+  0% {
+    transform: scale(0.6);
+    opacity: 0.9;
+  }
+  70% {
+    transform: scale(1.7);
+    opacity: 0;
+  }
+  100% {
+    transform: scale(1.7);
+    opacity: 0;
+  }
+}

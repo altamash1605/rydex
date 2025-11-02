@@ -3,7 +3,7 @@
 import 'leaflet/dist/leaflet.css';
 
 import dynamic from 'next/dynamic';
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import RecenterButton from './RecenterButton';
 import SpeedHUD from './SpeedHUD';
 import ButtonBar from './ButtonBar';
@@ -21,22 +21,52 @@ export default function MapView() {
   const mapRef = useRef<LeafletMap | null>(null);
   const { currentPos, path } = useGeoTracker();
   useLeafletLayers();
-  const [userPanned, setUserPanned] = useState(false);
+  const [isFollowing, setIsFollowing] = useState(false);
+  const isProgrammaticMove = useRef(false);
+  const programmaticResetTimeout = useRef<number | null>(null);
 
-  const markerIcon = L.icon({
-    iconUrl: 'https://unpkg.com/leaflet@1.9.3/dist/images/marker-icon.png',
-    shadowUrl: 'https://unpkg.com/leaflet@1.9.3/dist/images/marker-shadow.png',
-    iconAnchor: [12, 41],
-  });
+  const markProgrammaticMove = () => {
+    isProgrammaticMove.current = true;
+    if (programmaticResetTimeout.current) {
+      window.clearTimeout(programmaticResetTimeout.current);
+    }
+    programmaticResetTimeout.current = window.setTimeout(() => {
+      isProgrammaticMove.current = false;
+      programmaticResetTimeout.current = null;
+    }, 400);
+  };
+
+  const markerIcon = useMemo(
+    () =>
+      L.divIcon({
+        className: 'pulsing-location-marker',
+        iconSize: [18, 18],
+        iconAnchor: [9, 9],
+        html: '<span class="pulsing-location-marker__inner"></span>',
+      }),
+    [],
+  );
 
   // Detect manual pan
   useEffect(() => {
     const map = mapRef.current;
     if (!map) return;
-    const handleMoveStart = () => setUserPanned(true);
-    map.on('movestart', handleMoveStart);
+    const handleUserMoveStart = () => {
+      if (isProgrammaticMove.current) {
+        isProgrammaticMove.current = false;
+        if (programmaticResetTimeout.current) {
+          window.clearTimeout(programmaticResetTimeout.current);
+          programmaticResetTimeout.current = null;
+        }
+        return;
+      }
+      setIsFollowing(false);
+    };
+    map.on('movestart', handleUserMoveStart);
+    map.on('zoomstart', handleUserMoveStart);
     return () => {
-      map.off('movestart', handleMoveStart);
+      map.off('movestart', handleUserMoveStart);
+      map.off('zoomstart', handleUserMoveStart);
     };
   }, []);
 
@@ -44,10 +74,28 @@ export default function MapView() {
   useEffect(() => {
     const map = mapRef.current;
     const coords = currentPos.current;
-    if (map && coords && !userPanned) {
-      map.setView([coords[0], coords[1]]);
+    if (map && coords && isFollowing) {
+      markProgrammaticMove();
+      map.setView([coords[0], coords[1]], map.getZoom(), { animate: true });
     }
-  }, [currentPos.current, userPanned]);
+  }, [path, isFollowing, currentPos]);
+
+  const handleRecenter = () => {
+    const map = mapRef.current;
+    const coords = currentPos.current;
+    if (!map || !coords) return;
+    markProgrammaticMove();
+    setIsFollowing(true);
+    map.setView([coords[0], coords[1]], map.getZoom(), { animate: true });
+  };
+
+  useEffect(() => {
+    return () => {
+      if (programmaticResetTimeout.current) {
+        window.clearTimeout(programmaticResetTimeout.current);
+      }
+    };
+  }, []);
 
   const lat = currentPos.current?.[0] ?? 0;
   const lng = currentPos.current?.[1] ?? 0;
@@ -57,7 +105,9 @@ export default function MapView() {
       {/* Map layer */}
       <div className="absolute inset-0">
         <MapContainer
-          ref={mapRef as any}
+          whenCreated={(mapInstance) => {
+            mapRef.current = mapInstance;
+          }}
           center={[lat, lng]}
           zoom={16}
           style={{ height: '100%', width: '100%' }}
@@ -97,7 +147,7 @@ export default function MapView() {
       >
         <div className="pointer-events-auto relative w-full max-w-sm">
           <div className="absolute -top-16 right-2">
-            <RecenterButton mapRef={mapRef} setUserPanned={setUserPanned} />
+            <RecenterButton onRecenter={handleRecenter} isFollowing={isFollowing} />
           </div>
           <ButtonBar />
         </div>
