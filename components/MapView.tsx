@@ -1,5 +1,6 @@
 'use client';
 
+import 'leaflet/dist/leaflet.css';
 import dynamic from 'next/dynamic';
 import { useEffect, useRef, useState } from 'react';
 import RecenterButton from './RecenterButton';
@@ -9,7 +10,6 @@ import { useGeoTracker } from './useGeoTracker';
 import { useLeafletLayers } from './useLeafletLayers';
 import type { Map as LeafletMap } from 'leaflet';
 import L from 'leaflet';
-import 'leaflet/dist/leaflet.css';
 
 const MapContainer = dynamic(() => import('react-leaflet').then(m => m.MapContainer), { ssr: false });
 const TileLayer = dynamic(() => import('react-leaflet').then(m => m.TileLayer), { ssr: false });
