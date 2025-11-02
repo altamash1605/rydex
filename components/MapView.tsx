@@ -105,9 +105,7 @@ export default function MapView() {
       {/* Map layer */}
       <div className="absolute inset-0">
         <MapContainer
-          whenCreated={(mapInstance) => {
-            mapRef.current = mapInstance;
-          }}
+          ref={mapRef}
           center={[lat, lng]}
           zoom={16}
           style={{ height: '100%', width: '100%' }}
