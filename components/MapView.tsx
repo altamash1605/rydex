@@ -53,7 +53,7 @@ export default function MapView() {
   const lng = currentPos.current?.[1] ?? 0;
 
   return (
-    <div className="relative h-full w-full overflow-hidden bg-[#030712]">
+    <div className="relative h-full w-full overflow-hidden bg-[#111827]">
       {/* Map layer */}
       <div className="absolute inset-0">
         <MapContainer
@@ -64,20 +64,19 @@ export default function MapView() {
           zoomControl={false}
         >
           <TileLayer
-            url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
-            attribution="&copy; OpenStreetMap contributors"
+            url="https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png"
+            attribution="&copy; <a href=\"https://carto.com/attributions\">CARTO</a> &copy; OpenStreetMap contributors"
           />
           {currentPos.current && (
             <Marker position={[lat, lng]} icon={markerIcon}></Marker>
           )}
-          {path.length > 1 && <Polyline positions={path} color="blue" />}
+          {path.length > 1 && <Polyline positions={path} color="#fb923c" weight={4} />} 
         </MapContainer>
       </div>
 
       {/* Atmospheric layers */}
-      <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_top,_rgba(80,112,255,0.28),_transparent_55%)]" />
-      <div className="pointer-events-none absolute inset-x-0 top-0 h-[32%] bg-[linear-gradient(180deg,rgba(3,7,18,0.72)_0%,rgba(3,7,18,0.15)_65%,rgba(3,7,18,0)_100%)]" />
-      <div className="pointer-events-none absolute inset-x-0 bottom-0 h-[55%] bg-[linear-gradient(180deg,rgba(3,7,18,0)_0%,rgba(3,7,18,0.55)_40%,rgba(3,7,18,0.92)_100%)]" />
+      <div className="pointer-events-none absolute inset-x-0 top-0 h-[30%] bg-[linear-gradient(180deg,rgba(17,24,39,0.85)_0%,rgba(17,24,39,0.25)_70%,rgba(17,24,39,0)_100%)]" />
+      <div className="pointer-events-none absolute inset-x-0 bottom-0 h-[45%] bg-[linear-gradient(180deg,rgba(17,24,39,0)_0%,rgba(17,24,39,0.55)_45%,rgba(17,24,39,0.9)_100%)]" />
 
       {/* --- Floating Overlays --- */}
 
@@ -94,16 +93,14 @@ export default function MapView() {
       {/* Bottom Button */}
       <div
         className="rydex-overlay rydex-overlay-bottom pointer-events-none absolute inset-x-0 bottom-0 flex justify-center px-4 sm:px-6"
-        style={{ paddingBottom: 'calc(max(env(safe-area-inset-bottom, 0px), 18px) + clamp(1.1rem, 4vw, 1.85rem))' }}
+        style={{ paddingBottom: 'calc(max(env(safe-area-inset-bottom, 0px), 14px) + clamp(1rem, 3.5vw, 1.6rem))' }}
       >
-        <div className="pointer-events-auto w-full max-w-xl">
+        <div className="pointer-events-auto relative w-full max-w-sm">
+          <div className="absolute -top-16 right-2">
+            <RecenterButton mapRef={mapRef} setUserPanned={setUserPanned} />
+          </div>
           <ButtonBar />
         </div>
-      </div>
-
-      {/* Recenter Button */}
-      <div className="rydex-overlay pointer-events-auto absolute bottom-40 right-6 hidden sm:block">
-        <RecenterButton mapRef={mapRef} setUserPanned={setUserPanned} />
       </div>
     </div>
   );

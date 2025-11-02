@@ -24,19 +24,18 @@ export default function RecenterButton({
   return (
     <button
       onClick={handleRecenter}
-      className="bg-white shadow-lg rounded-full p-3 border border-gray-200 hover:bg-gray-100 active:scale-95 transition-all"
-      style={{ width: 48, height: 48 }}
+      className="flex h-12 w-12 items-center justify-center rounded-full border border-slate-200 bg-white text-slate-600 shadow-[0_12px_30px_rgba(15,23,42,0.25)] transition-transform hover:bg-slate-50 active:scale-95"
     >
       <svg
         xmlns="http://www.w3.org/2000/svg"
-        fill="none"
         viewBox="0 0 24 24"
-        strokeWidth={2}
-        stroke="black"
-        className="w-5 h-5 mx-auto"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth={1.8}
+        className="h-5 w-5"
       >
-        <path strokeLinecap="round" strokeLinejoin="round" d="M12 6v6l4 2" />
-        <circle cx="12" cy="12" r="9" stroke="black" strokeWidth="2" fill="none" />
+        <path strokeLinecap="round" strokeLinejoin="round" d="M12 5V3m0 18v-2m7-7h2M3 12h2" />
+        <circle cx="12" cy="12" r="5" fill="none" />
       </svg>
     </button>
   );
