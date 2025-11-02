@@ -13,15 +13,15 @@ export default function RootLayout({
   children: React.ReactNode;
 }) {
   return (
-    <html lang="en">
+    <html lang="en" className="h-full">
       <head>
-        {/* ✅ PWA Manifest Link */}
         <link rel="manifest" href="/manifest.json" />
         <meta name="theme-color" content="#000000" />
       </head>
-      <body className="m-0 p-0 overflow-hidden bg-gray-100">
-        {/* ✅ Wrap everything in the permission checker */}
-        <GeoPermissionWrapper>{children}</GeoPermissionWrapper>
+      <body className="h-full w-full m-0 p-0 overflow-hidden bg-black">
+        <GeoPermissionWrapper>
+          <div className="h-screen w-screen relative">{children}</div>
+        </GeoPermissionWrapper>
       </body>
     </html>
   );
