@@ -193,44 +193,150 @@ export default function MapView() {
     if (!mapReady) {
       return;
     }
+
     const map = mapRef.current;
     if (!map) {
       return;
     }
 
     map.doubleClickZoom.disable();
-    // Allow fractional zoom levels so the gesture can smoothly interpolate without
-    // Leaflet snapping back to integer zooms (which causes the "steppy" feel).
     const previousZoomSnap = map.options.zoomSnap;
     const previousZoomDelta = map.options.zoomDelta;
     map.options.zoomSnap = 0;
     map.options.zoomDelta = 0.01;
 
     const container = map.getContainer();
+    const mapPane = map.getPanes().mapPane;
+    if (!container || !mapPane) {
+      map.options.zoomSnap = previousZoomSnap;
+      map.options.zoomDelta = previousZoomDelta;
+      map.doubleClickZoom.enable();
+      return;
+    }
+
     let lastTapTime = 0;
+    let pointerId: number | null = null;
     let gestureActive = false;
     let movedDuringGesture = false;
-    let initialY = 0;
-    let initialZoom = map.getZoom();
+    let startY = 0;
+    let startZoom = map.getZoom();
     let anchorPoint: L.Point | null = null;
+    let anchorLatLng: L.LatLng | null = null;
+    let lastScale = 1;
+    let rafId: number | null = null;
     let draggingDisabledForGesture = false;
-    const sensitivity = 120;
 
-    const endGesture = () => {
+    const sensitivity = 240;
+    const minZoom = map.getMinZoom();
+    const maxZoom = map.getMaxZoom();
+
+    const cancelAnimation = () => {
+      if (rafId != null) {
+        window.cancelAnimationFrame(rafId);
+        rafId = null;
+      }
+    };
+
+    const clearPaneStyles = () => {
+      cancelAnimation();
+      mapPane.style.transition = '';
+      mapPane.style.transform = '';
+      mapPane.style.transformOrigin = '';
+      mapPane.style.willChange = '';
+    };
+
+    const animateBackToIdentity = (withTransition: boolean) => {
+      cancelAnimation();
+      if (withTransition) {
+        mapPane.style.transition = 'transform 150ms ease-out';
+        mapPane.style.transform = 'scale(1)';
+        let handled = false;
+        const handleTransitionEnd = () => {
+          handled = true;
+          clearPaneStyles();
+          mapPane.removeEventListener('transitionend', handleTransitionEnd);
+        };
+        mapPane.addEventListener('transitionend', handleTransitionEnd);
+        window.setTimeout(() => {
+          if (!handled) {
+            mapPane.removeEventListener('transitionend', handleTransitionEnd);
+            clearPaneStyles();
+          }
+        }, 180);
+      } else {
+        clearPaneStyles();
+      }
+    };
+
+    const applyVisualScale = (scale: number) => {
+      cancelAnimation();
+      rafId = window.requestAnimationFrame(() => {
+        mapPane.style.willChange = 'transform';
+        mapPane.style.transition = 'none';
+        if (anchorPoint) {
+          mapPane.style.transformOrigin = `${anchorPoint.x}px ${anchorPoint.y}px`;
+        }
+        mapPane.style.transform = `scale(${scale})`;
+      });
+    };
+
+    const endGesture = (commit: boolean) => {
+      if (!gestureActive) {
+        return;
+      }
+
       gestureActive = false;
-      movedDuringGesture = false;
-      anchorPoint = null;
-      initialY = 0;
-      initialZoom = map.getZoom();
+
+      if (pointerId != null && container.releasePointerCapture) {
+        try {
+          container.releasePointerCapture(pointerId);
+        } catch {
+          // ignore capture release failures
+        }
+      }
+      pointerId = null;
+
       if (draggingDisabledForGesture && map.dragging && !map.dragging.enabled()) {
         map.dragging.enable();
       }
       draggingDisabledForGesture = false;
+
+      if (!commit) {
+        animateBackToIdentity(false);
+        anchorPoint = null;
+        anchorLatLng = null;
+        lastScale = 1;
+        movedDuringGesture = false;
+        startZoom = map.getZoom();
+        return;
+      }
+
+      const targetZoom = Math.max(
+        minZoom,
+        Math.min(maxZoom, startZoom + Math.log2(lastScale || 1)),
+      );
+
+      animateBackToIdentity(true);
+
+      const focusLatLng = anchorLatLng;
+      window.requestAnimationFrame(() => {
+        if (focusLatLng) {
+          map.setZoomAround(focusLatLng, targetZoom, { animate: true });
+        } else {
+          map.setZoom(targetZoom, { animate: true });
+        }
+      });
+
+      anchorPoint = null;
+      anchorLatLng = null;
+      lastScale = 1;
+      movedDuringGesture = false;
+      startZoom = map.getZoom();
     };
 
-    const handleTouchStart = (event: TouchEvent) => {
-      if (event.touches.length !== 1) {
-        endGesture();
+    const handlePointerDown = (event: PointerEvent) => {
+      if (event.pointerType !== 'touch') {
+        lastTapTime = performance.now();
         return;
       }
 
@@ -238,81 +344,105 @@ export default function MapView() {
       const delta = now - lastTapTime;
       lastTapTime = now;
 
-      if (delta < 300) {
-        const touch = event.touches[0];
+      if (delta > 40 && delta < 320) {
+        pointerId = event.pointerId;
         const rect = container.getBoundingClientRect();
-        anchorPoint = L.point(touch.clientX - rect.left, touch.clientY - rect.top);
-        initialY = touch.clientY;
-        initialZoom = map.getZoom();
+        anchorPoint = L.point(event.clientX - rect.left, event.clientY - rect.top);
+        anchorLatLng = map.containerPointToLatLng(anchorPoint);
+        startY = event.clientY;
+        startZoom = map.getZoom();
+        lastScale = 1;
         movedDuringGesture = false;
         gestureActive = true;
+
         if (map.dragging && map.dragging.enabled()) {
           map.dragging.disable();
           draggingDisabledForGesture = true;
         } else {
           draggingDisabledForGesture = false;
         }
+
+        if (container.setPointerCapture) {
+          try {
+            container.setPointerCapture(event.pointerId);
+          } catch {
+            // ignore capture errors
+          }
+        }
+
         event.preventDefault();
         event.stopPropagation();
-      } else {
-        endGesture();
+      } else if (gestureActive) {
+        endGesture(false);
       }
     };
 
-    const handleTouchMove = (event: TouchEvent) => {
-      if (!gestureActive || event.touches.length !== 1) {
+    const handlePointerMove = (event: PointerEvent) => {
+      if (!gestureActive || event.pointerId !== pointerId) {
         return;
       }
-      const touch = event.touches[0];
-      const deltaY = initialY - touch.clientY;
-      const zoomDelta = deltaY / sensitivity;
-      const targetZoom = initialZoom + zoomDelta;
-      const minZoom = map.getMinZoom();
-      const maxZoom = map.getMaxZoom();
-      const newZoom = Math.max(minZoom, Math.min(maxZoom, targetZoom));
 
-      if (!Number.isNaN(newZoom)) {
+      const deltaY = startY - event.clientY;
+      const zoomDelta = deltaY / sensitivity;
+      const rawScale = Math.pow(2, zoomDelta);
+      const minScale = Math.pow(2, minZoom - startZoom);
+      const maxScale = Math.pow(2, maxZoom - startZoom);
+      const clampedScale = Math.max(minScale, Math.min(maxScale, rawScale));
+      lastScale = clampedScale;
+
+      if (!movedDuringGesture && Math.abs(Math.log2(clampedScale)) > 0.01) {
         movedDuringGesture = true;
-        if (anchorPoint) {
-          map.setZoomAround(anchorPoint, newZoom, { animate: false });
-        } else {
-          map.setZoom(newZoom, { animate: false });
-        }
       }
+
+      applyVisualScale(clampedScale);
 
       event.preventDefault();
       event.stopPropagation();
     };
 
-    const handleTouchEnd = (event: TouchEvent) => {
-      if (!gestureActive) {
+    const finishGesture = (event: PointerEvent) => {
+      if (!gestureActive || (pointerId != null && event.pointerId !== pointerId)) {
         return;
       }
 
-      if (!movedDuringGesture) {
+      if (movedDuringGesture) {
+        endGesture(true);
+      } else {
+        endGesture(false);
         map.zoomIn(1, { animate: true });
       }
 
-      endGesture();
+      lastTapTime = 0;
       event.preventDefault();
       event.stopPropagation();
     };
 
-    const handleTouchCancel = () => {
-      endGesture();
+    const handlePointerUp = (event: PointerEvent) => {
+      finishGesture(event);
     };
 
-    container.addEventListener('touchstart', handleTouchStart, { passive: false });
-    container.addEventListener('touchmove', handleTouchMove, { passive: false });
-    container.addEventListener('touchend', handleTouchEnd);
-    container.addEventListener('touchcancel', handleTouchCancel);
+    const handlePointerCancel = (event: PointerEvent) => {
+      if (!gestureActive || (pointerId != null && event.pointerId !== pointerId)) {
+        return;
+      }
+      endGesture(false);
+      lastTapTime = 0;
+    };
+
+    container.addEventListener('pointerdown', handlePointerDown, { passive: false });
+    container.addEventListener('pointermove', handlePointerMove, { passive: false });
+    container.addEventListener('pointerup', handlePointerUp, { passive: false });
+    container.addEventListener('pointercancel', handlePointerCancel);
+    container.addEventListener('pointerleave', handlePointerCancel);
 
     return () => {
-      container.removeEventListener('touchstart', handleTouchStart);
-      container.removeEventListener('touchmove', handleTouchMove);
-      container.removeEventListener('touchend', handleTouchEnd);
-      container.removeEventListener('touchcancel', handleTouchCancel);
-      endGesture();
+      cancelAnimation();
+      container.removeEventListener('pointerdown', handlePointerDown);
+      container.removeEventListener('pointermove', handlePointerMove);
+      container.removeEventListener('pointerup', handlePointerUp);
+      container.removeEventListener('pointercancel', handlePointerCancel);
+      container.removeEventListener('pointerleave', handlePointerCancel);
+      endGesture(false);
       map.options.zoomSnap = previousZoomSnap;
       map.options.zoomDelta = previousZoomDelta;
       map.doubleClickZoom.enable();
@@ -346,6 +476,9 @@ export default function MapView() {
           zoom={16}
           style={{ height: '100%', width: '100%' }}
           zoomControl={false}
+          doubleClickZoom={false}
+          zoomSnap={0}
+          zoomDelta={0.01}
         >
           <TileLayer
             url="https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png"
