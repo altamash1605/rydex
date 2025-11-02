@@ -115,12 +115,13 @@ export default function MapView() {
   // ✅ Important layout fix: make the map truly fullscreen and prevent overflow
   return (
     <div className="fixed inset-0 overflow-hidden">
+      {/* Map background */}
       <MapContainer
         center={center as [number, number]}
         zoom={15}
         zoomControl={false}
         attributionControl={false}
-        className="absolute inset-0 h-full w-full z-0"
+        className="absolute inset-0 h-full w-full z-0"  // 👈 ensures map is background layer
         doubleClickZoom
         scrollWheelZoom
         dragging
@@ -132,21 +133,30 @@ export default function MapView() {
         />
       </MapContainer>
 
-      {/* Live marker dot */}
-      <div
-        ref={dotRef}
-        className="absolute z-[999] w-5 h-5 rounded-full bg-blue-500 border-[3px] border-white shadow-lg pointer-events-none transition-transform duration-75 ease-out"
-      />
+      {/* Overlays above map */}
+      <div className="absolute inset-0 z-10 pointer-events-none">
+        {/* Live marker dot */}
+        <div
+          ref={dotRef}
+          className="absolute w-5 h-5 rounded-full bg-blue-500 border-[3px] border-white shadow-lg pointer-events-none transition-transform duration-75 ease-out"
+        />
 
-      {/* GPS accuracy warning */}
-      {lowAccuracy && (
-        <div className="absolute bottom-24 left-1/2 -translate-x-1/2 bg-blue-600 text-white px-4 py-2 rounded-xl shadow-lg text-sm animate-pulse">
-          GPS accuracy low ({accuracyValue?.toFixed(0)} m)
+        {/* GPS accuracy warning */}
+        {lowAccuracy && (
+          <div className="absolute bottom-24 left-1/2 -translate-x-1/2 bg-blue-600 text-white px-4 py-2 rounded-xl shadow-lg text-sm animate-pulse">
+            GPS accuracy low ({accuracyValue?.toFixed(0)} m)
+          </div>
+        )}
+
+        {/* Buttons, HUD, etc. (interactive elements) */}
+        <div className="pointer-events-auto">
+          <RecenterButton onClick={handleRecenter} visible={true} />
+          {/* 👇 If you have other buttons or HUD, keep them here too */}
+          {/* <ButtonBar /> */}
+          {/* <SpeedHUD /> */}
         </div>
-      )}
-
-      {/* ✅ Recenter button now completely independent of map position */}
-      <RecenterButton onClick={handleRecenter} visible={true} />
+      </div>
     </div>
   );
+
 }
