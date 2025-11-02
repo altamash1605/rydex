@@ -1,28 +1,51 @@
 'use client';
 
-type ButtonProps = {
+import { useCallback, useEffect, useMemo, useState } from 'react';
+
+type RidePhase = 'idle' | 'toPickup' | 'riding';
+
+type ButtonState = {
   label: string;
-  onClick: () => void;
+  event: 'rydex-pickup-start' | 'rydex-ride-start' | 'rydex-ride-end';
 };
 
-function RideButton({ label, onClick }: ButtonProps) {
+export default function ButtonBar() {
+  const [phase, setPhase] = useState<RidePhase>('idle');
+
+  useEffect(() => {
+    const handleStats: EventListener = (event) => {
+      const detail = (event as CustomEvent).detail as { phase?: RidePhase } | undefined;
+      if (detail?.phase) setPhase(detail.phase);
+    };
+
+    window.addEventListener('rydex-ride-stats', handleStats);
+    return () => {
+      window.removeEventListener('rydex-ride-stats', handleStats);
+    };
+  }, []);
+
+  const config = useMemo<ButtonState>(() => {
+    switch (phase) {
+      case 'toPickup':
+        return { label: 'Start Ride', event: 'rydex-ride-start' };
+      case 'riding':
+        return { label: 'End Ride', event: 'rydex-ride-end' };
+      default:
+        return { label: 'Go to Pickup', event: 'rydex-pickup-start' };
+    }
+  }, [phase]);
+
+  const handlePrimaryAction = useCallback(() => {
+    window.dispatchEvent(new Event(config.event));
+  }, [config.event]);
+
   return (
     <button
-      onClick={onClick}
-      className="bg-black text-white font-semibold rounded-xl px-5 py-3 mx-1 shadow-md active:scale-95 transition-all"
+      type="button"
+      onClick={handlePrimaryAction}
+      className="w-full rounded-full bg-black py-4 text-lg font-semibold uppercase tracking-[0.35em] text-white shadow-[0_18px_40px_rgba(15,23,42,0.3)] transition-transform active:scale-[0.98]"
     >
-      {label}
+      {config.label}
     </button>
-  );
-}
-
-export default function ButtonBar() {
-  return (
-    <div className="flex justify-center bg-white/80 backdrop-blur-sm rounded-2xl shadow-lg px-3 py-2">
-      <RideButton label="Go to Pickup" onClick={() => console.log('Go to Pickup')} />
-      <RideButton label="Start Ride" onClick={() => console.log('Start Ride')} />
-      <RideButton label="End Ride" onClick={() => console.log('End Ride')} />
-      <RideButton label="Abort" onClick={() => console.log('Abort')} />
-    </div>
   );
 }

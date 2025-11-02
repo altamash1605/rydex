@@ -196,8 +196,10 @@ export default function RideController() {
     };
 
     const startRide = async () => {
-      if (phase !== 'toPickup') return;
+      if (phase === 'riding') return;
       setPhase('riding');
+      setPickupStartAt(null);
+      setPickupSec(0);
       setRideStartAt(Date.now());
       setDistanceM(0);
       setPoints([]);

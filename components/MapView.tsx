@@ -53,40 +53,47 @@ export default function MapView() {
   const lng = currentPos.current?.[1] ?? 0;
 
   return (
-    <div className="relative w-full h-full overflow-hidden bg-black">
+    <div className="relative h-full w-full overflow-hidden bg-[#f5f5f5]">
       {/* Map layer */}
-      <MapContainer
-        ref={mapRef as any}
-        center={[lat, lng]}
-        zoom={16}
-        style={{ height: '100%', width: '100%' }}
-        zoomControl={false}
-      >
-        <TileLayer
-          url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
-          attribution="&copy; OpenStreetMap contributors"
-        />
-        {currentPos.current && (
-          <Marker position={[lat, lng]} icon={markerIcon}></Marker>
-        )}
-        {path.length > 1 && <Polyline positions={path} color="blue" />}
-      </MapContainer>
+      <div className="absolute inset-0">
+        <MapContainer
+          ref={mapRef as any}
+          center={[lat, lng]}
+          zoom={16}
+          style={{ height: '100%', width: '100%' }}
+          zoomControl={false}
+        >
+          <TileLayer
+            url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
+            attribution="&copy; OpenStreetMap contributors"
+          />
+          {currentPos.current && (
+            <Marker position={[lat, lng]} icon={markerIcon}></Marker>
+          )}
+          {path.length > 1 && <Polyline positions={path} color="blue" />}
+        </MapContainer>
+      </div>
+
+      {/* Soft lighting layer to match mock */}
+      <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_top,_rgba(255,255,255,0.35),_transparent_55%)]" />
 
       {/* --- Floating Overlays --- */}
 
       {/* Top HUD */}
-      <div className="rydex-overlay absolute top-3 left-3 right-3">
+      <div className="rydex-overlay pointer-events-none absolute top-6 left-0 right-0 flex justify-center px-6">
         <SpeedHUD />
       </div>
 
-      {/* Recenter Button */}
-      <div className="rydex-overlay absolute bottom-24 right-4">
-        <RecenterButton mapRef={mapRef} setUserPanned={setUserPanned} />
+      {/* Bottom Button */}
+      <div className="rydex-overlay rydex-overlay-bottom pointer-events-none absolute bottom-6 left-0 right-0 flex justify-center px-6">
+        <div className="pointer-events-auto w-full max-w-md">
+          <ButtonBar />
+        </div>
       </div>
 
-      {/* Bottom Button */}
-      <div className="rydex-overlay rydex-overlay-bottom absolute bottom-3 left-3 right-3 flex justify-center">
-        <ButtonBar />
+      {/* Recenter Button */}
+      <div className="rydex-overlay pointer-events-auto absolute bottom-36 right-6 hidden sm:block">
+        <RecenterButton mapRef={mapRef} setUserPanned={setUserPanned} />
       </div>
     </div>
   );
