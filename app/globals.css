@@ -1,3 +1,7 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
 /* --- Fix map overflow and layout stretching --- */
 html,
 body,
