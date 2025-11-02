@@ -120,7 +120,7 @@ export default function MapView() {
         zoom={15}
         zoomControl={false}
         attributionControl={false}
-        className="absolute inset-0 h-full w-full"
+        className="absolute inset-0 h-full w-full z-0"
         doubleClickZoom
         scrollWheelZoom
         dragging
