@@ -13,14 +13,29 @@ import { startBackgroundTracking } from '../utils/backgroundLocation';
 
 // Optional dynamic import so web build doesn’t break if Capacitor isn’t present
 let Geolocation: any = null;
-(async () => {
-  try {
-    const mod = await import('@capacitor/geolocation');
-    Geolocation = mod.Geolocation;
-  } catch {
-    // Running on web – ignore
+let geolocationLoadPromise: Promise<void> | null = null;
+
+function ensureCapacitorGeolocation(): Promise<void> {
+  if (geolocationLoadPromise) {
+    return geolocationLoadPromise;
   }
-})();
+  if (typeof window === 'undefined') {
+    return Promise.resolve();
+  }
+
+  geolocationLoadPromise = import('@capacitor/geolocation')
+    .then((mod) => {
+      Geolocation = mod.Geolocation;
+    })
+    .catch(() => {
+      Geolocation = undefined;
+    })
+    .finally(() => {
+      geolocationLoadPromise = null;
+    });
+
+  return geolocationLoadPromise;
+}
 
 export function useGeoTracker() {
   const [path, setPath] = useState<LatLng[]>([]);
@@ -53,25 +68,26 @@ export function useGeoTracker() {
   }, []);
 
   useEffect(() => {
-    let appListener: { remove: () => Promise<void> | void } | undefined;
-
-    (async () => {
-      try {
-        const { App } = await import('@capacitor/app');
-        appListener = await App.addListener('appStateChange', async ({ isActive }) => {
-          if (isActive) {
-            const snapshot = await reloadLocationStoreFromStorage();
-            setPath(snapshot.path);
-            currentPos.current = snapshot.current;
-          }
-        });
-      } catch {
-        // App plugin not available (likely web) – no-op
+    const handleVisibility = async () => {
+      if (document.visibilityState === 'visible') {
+        const snapshot = await reloadLocationStoreFromStorage();
+        setPath(snapshot.path);
+        currentPos.current = snapshot.current;
       }
-    })();
+    };
+
+    const handleWindowFocus = async () => {
+      const snapshot = await reloadLocationStoreFromStorage();
+      setPath(snapshot.path);
+      currentPos.current = snapshot.current;
+    };
+
+    document.addEventListener('visibilitychange', handleVisibility);
+    window.addEventListener('focus', handleWindowFocus);
 
     return () => {
-      void appListener?.remove?.();
+      document.removeEventListener('visibilitychange', handleVisibility);
+      window.removeEventListener('focus', handleWindowFocus);
     };
   }, []);
 
@@ -80,6 +96,7 @@ export function useGeoTracker() {
 
     async function startWatch() {
       try {
+        await ensureCapacitorGeolocation();
         const handlePos = (latitude: number, longitude: number, accuracy: number) => {
           if (!isMounted) return;
           void recordLocation([latitude, longitude], accuracy);

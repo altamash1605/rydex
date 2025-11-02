@@ -1,8 +1,25 @@
-import BackgroundGeolocation from '@capacitor-community/background-geolocation';
+import { Capacitor, registerPlugin } from '@capacitor/core';
 import { recordLocation } from './locationStore';
 
-// 👇 We alias it to "BG" to make TypeScript happy even when running on web.
-const BG: any = BackgroundGeolocation;
+type BackgroundPlugin = {
+  requestPermissions?: () => Promise<void>;
+  addWatcher: (
+    options: Record<string, unknown>,
+    callback: (location: any, error: any) => void,
+  ) => Promise<string>;
+  removeWatcher?: (options: { id: string }) => Promise<void>;
+};
+
+const BackgroundGeolocation = registerPlugin<BackgroundPlugin>('BackgroundGeolocation', {
+  web: () => ({
+    requestPermissions: async () => undefined,
+    addWatcher: async () => {
+      console.warn('Background geolocation is not available on the web.');
+      return 'web-noop';
+    },
+    removeWatcher: async () => undefined,
+  }),
+});
 
 let watcherId: string | null = null;
 
@@ -11,21 +28,26 @@ let watcherId: string | null = null;
  * Requests permission if needed, then begins continuous tracking.
  */
 export async function startBackgroundTracking() {
-  if (!BG) {
+  if (watcherId) {
     return;
   }
-  if (watcherId) {
+
+  if (!Capacitor.isNativePlatform()) {
+    return;
+  }
+
+  if (!Capacitor.isPluginAvailable('BackgroundGeolocation')) {
     return;
   }
 
   try {
     // Request permissions only if available (prevents errors during web builds)
-    if (BG?.requestPermissions) {
-      await BG.requestPermissions();
+    if (BackgroundGeolocation?.requestPermissions) {
+      await BackgroundGeolocation.requestPermissions();
     }
 
     // Add watcher for location updates
-    watcherId = await BG.addWatcher(
+    watcherId = await BackgroundGeolocation.addWatcher(
       {
         // Passing an ID is supported by the plugin even though the type definition omits it.
         id: 'rydex-tracker',
@@ -69,13 +91,17 @@ export async function startBackgroundTracking() {
  * Removes the active watcher if it exists.
  */
 export async function stopBackgroundTracking() {
-  if (!BG) {
+  if (!Capacitor.isNativePlatform()) {
+    return;
+  }
+
+  if (!Capacitor.isPluginAvailable('BackgroundGeolocation')) {
     return;
   }
 
   try {
-    if (watcherId && BG?.removeWatcher) {
-      await BG.removeWatcher({ id: watcherId });
+    if (watcherId && BackgroundGeolocation?.removeWatcher) {
+      await BackgroundGeolocation.removeWatcher({ id: watcherId });
       watcherId = null;
       console.log('Stopped background tracking');
     }

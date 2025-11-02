@@ -203,26 +203,43 @@ export default function MapView() {
     const container = map.getContainer();
     let lastTapTime = 0;
     let gestureActive = false;
+    let movedDuringGesture = false;
     let initialY = 0;
     let initialZoom = map.getZoom();
+    let anchorPoint: L.Point | null = null;
     let draggingDisabledForGesture = false;
     const sensitivity = 120;
 
+    const endGesture = () => {
+      gestureActive = false;
+      movedDuringGesture = false;
+      anchorPoint = null;
+      initialY = 0;
+      initialZoom = map.getZoom();
+      if (draggingDisabledForGesture && map.dragging && !map.dragging.enabled()) {
+        map.dragging.enable();
+      }
+      draggingDisabledForGesture = false;
+    };
+
     const handleTouchStart = (event: TouchEvent) => {
       if (event.touches.length !== 1) {
-        if (gestureActive && draggingDisabledForGesture && map.dragging && !map.dragging.enabled()) {
-          map.dragging.enable();
-        }
-        gestureActive = false;
-        draggingDisabledForGesture = false;
+        endGesture();
         return;
       }
 
-      const now = Date.now();
-      if (now - lastTapTime < 300) {
-        gestureActive = true;
-        initialY = event.touches[0].clientY;
+      const now = performance.now();
+      const delta = now - lastTapTime;
+      lastTapTime = now;
+
+      if (delta < 300) {
+        const touch = event.touches[0];
+        const rect = container.getBoundingClientRect();
+        anchorPoint = L.point(touch.clientX - rect.left, touch.clientY - rect.top);
+        initialY = touch.clientY;
         initialZoom = map.getZoom();
+        movedDuringGesture = false;
+        gestureActive = true;
         if (map.dragging && map.dragging.enabled()) {
           map.dragging.disable();
           draggingDisabledForGesture = true;
@@ -230,14 +247,10 @@ export default function MapView() {
           draggingDisabledForGesture = false;
         }
         event.preventDefault();
+        event.stopPropagation();
       } else {
-        gestureActive = false;
-        if (draggingDisabledForGesture && map.dragging && !map.dragging.enabled()) {
-          map.dragging.enable();
-        }
-        draggingDisabledForGesture = false;
+        endGesture();
       }
-      lastTapTime = now;
     };
 
     const handleTouchMove = (event: TouchEvent) => {
@@ -251,33 +264,36 @@ export default function MapView() {
       const minZoom = map.getMinZoom();
       const maxZoom = map.getMaxZoom();
       const newZoom = Math.max(minZoom, Math.min(maxZoom, targetZoom));
+
       if (!Number.isNaN(newZoom)) {
-        map.setZoom(newZoom, { animate: false });
+        movedDuringGesture = true;
+        if (anchorPoint) {
+          map.setZoomAround(anchorPoint, newZoom, { animate: false });
+        } else {
+          map.setZoom(newZoom, { animate: false });
+        }
       }
+
       event.preventDefault();
+      event.stopPropagation();
     };
 
     const handleTouchEnd = (event: TouchEvent) => {
       if (!gestureActive) {
         return;
       }
-      gestureActive = false;
-      if (draggingDisabledForGesture && map.dragging && !map.dragging.enabled()) {
-        map.dragging.enable();
+
+      if (!movedDuringGesture) {
+        map.zoomIn(1, { animate: true });
       }
-      draggingDisabledForGesture = false;
+
+      endGesture();
       event.preventDefault();
+      event.stopPropagation();
     };
 
     const handleTouchCancel = () => {
-      if (!gestureActive) {
-        return;
-      }
-      gestureActive = false;
-      if (draggingDisabledForGesture && map.dragging && !map.dragging.enabled()) {
-        map.dragging.enable();
-      }
-      draggingDisabledForGesture = false;
+      endGesture();
     };
 
     container.addEventListener('touchstart', handleTouchStart, { passive: false });
@@ -290,9 +306,8 @@ export default function MapView() {
       container.removeEventListener('touchmove', handleTouchMove);
       container.removeEventListener('touchend', handleTouchEnd);
       container.removeEventListener('touchcancel', handleTouchCancel);
-      if (draggingDisabledForGesture && map.dragging && !map.dragging.enabled()) {
-        map.dragging.enable();
-      }
+      endGesture();
+      map.doubleClickZoom.enable();
     };
   }, [mapReady]);
 
