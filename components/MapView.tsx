@@ -94,7 +94,7 @@ export default function MapView() {
       {/* Bottom Button */}
       <div
         className="rydex-overlay rydex-overlay-bottom pointer-events-none absolute inset-x-0 bottom-0 flex justify-center px-4 sm:px-6"
-        style={{ paddingBottom: 'calc(env(safe-area-inset-bottom, 1rem) + clamp(1rem, 4vw, 1.75rem))' }}
+        style={{ paddingBottom: 'calc(max(env(safe-area-inset-bottom, 0px), 18px) + clamp(1.1rem, 4vw, 1.85rem))' }}
       >
         <div className="pointer-events-auto w-full max-w-xl">
           <ButtonBar />

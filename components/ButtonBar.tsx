@@ -106,36 +106,38 @@ export default function ButtonBar() {
   const activeDurationLabel = stats.phase === 'riding' ? 'Ride time' : stats.phase === 'toPickup' ? 'Pickup time' : 'Idle time';
 
   return (
-    <div className="w-full max-h-[min(360px,55vh)] overflow-y-auto rounded-[36px] border border-white/25 bg-white/95 p-4 text-slate-900 shadow-[0_32px_70px_rgba(9,12,24,0.45)] backdrop-blur-xl sm:p-6">
-      <div className="flex flex-col gap-4 sm:gap-5">
-        <div className="flex flex-col gap-2 text-[10px] uppercase tracking-[0.35em] text-slate-500 sm:flex-row sm:items-center sm:justify-between sm:tracking-[0.45em]">
-          <span className="font-semibold text-slate-600">{phaseLabel}</span>
-          <span>
+    <div className="w-full max-h-[min(280px,48vh)] overflow-y-auto rounded-[28px] border border-white/25 bg-white/95 p-3.5 text-slate-900 shadow-[0_32px_70px_rgba(9,12,24,0.45)] backdrop-blur-xl sm:max-h-[min(360px,55vh)] sm:rounded-[36px] sm:p-6">
+      <div className="flex flex-col gap-3.5 sm:gap-5">
+        <div className="flex flex-col gap-1.5 text-[9px] uppercase tracking-[0.32em] text-slate-500 sm:flex-row sm:items-center sm:justify-between sm:text-[10px] sm:tracking-[0.45em]">
+          <span className="font-semibold text-slate-600 sm:text-left">{phaseLabel}</span>
+          <span className="tracking-[0.28em] text-slate-500 sm:tracking-[0.45em]">
             {activeDurationLabel}
             <span className="ml-2 font-semibold text-slate-800">{formatDuration(activeDuration)}</span>
           </span>
         </div>
 
-        <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between sm:gap-4">
+        <div className="flex flex-col gap-2.5 sm:flex-row sm:items-end sm:justify-between sm:gap-4">
           <div className="flex flex-col gap-1">
-            <span className="text-[10px] uppercase tracking-[0.3em] text-slate-400 sm:tracking-[0.4em]">Distance covered</span>
-            <span className="text-xl font-semibold tracking-[0.08em] text-slate-900 sm:text-2xl sm:tracking-[0.12em]">{formatDistance(stats.distanceM)}</span>
+            <span className="text-[9px] uppercase tracking-[0.28em] text-slate-400 sm:text-[10px] sm:tracking-[0.4em]">Distance covered</span>
+            <span className="text-lg font-semibold tracking-[0.08em] text-slate-900 sm:text-2xl sm:tracking-[0.12em]">{formatDistance(stats.distanceM)}</span>
           </div>
           <div className="flex flex-col items-start gap-1 sm:items-end">
-            <span className="text-[10px] uppercase tracking-[0.3em] text-slate-400 sm:tracking-[0.4em]">Next action</span>
-            <span className="text-xs font-semibold uppercase tracking-[0.3em] text-slate-600 sm:text-sm sm:tracking-[0.4em]">{config.label}</span>
+            <span className="text-[9px] uppercase tracking-[0.28em] text-slate-400 sm:text-[10px] sm:tracking-[0.4em]">Next action</span>
+            <span className="text-[11px] font-semibold uppercase tracking-[0.28em] text-slate-600 sm:text-sm sm:tracking-[0.4em]">{config.label}</span>
           </div>
         </div>
 
         <button
           type="button"
           onClick={handlePrimaryAction}
-          className="w-full rounded-full bg-slate-900 py-3.5 text-xs font-semibold uppercase tracking-[0.35em] text-white shadow-[0_22px_55px_rgba(9,12,24,0.45)] transition-transform duration-150 hover:scale-[1.01] focus:outline-none focus-visible:ring-2 focus-visible:ring-white/70 active:scale-[0.98] sm:py-4 sm:text-sm sm:tracking-[0.45em]"
+          className="w-full rounded-full bg-slate-900 py-3 text-[11px] font-semibold uppercase tracking-[0.32em] text-white shadow-[0_22px_55px_rgba(9,12,24,0.45)] transition-transform duration-150 hover:scale-[1.01] focus:outline-none focus-visible:ring-2 focus-visible:ring-white/70 active:scale-[0.98] sm:py-4 sm:text-sm sm:tracking-[0.45em]"
         >
           {config.label}
         </button>
 
-        <p className="text-center text-[10px] uppercase tracking-[0.35em] text-slate-400 sm:tracking-[0.45em]">{phaseHint}</p>
+        <p className="px-1 text-center text-[9px] uppercase tracking-[0.32em] text-slate-400 sm:text-[10px] sm:tracking-[0.45em]">
+          {phaseHint}
+        </p>
       </div>
     </div>
   );
