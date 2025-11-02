@@ -1,6 +1,7 @@
+import 'leaflet/dist/leaflet.css';
+
 'use client';
 
-import 'leaflet/dist/leaflet.css';
 import dynamic from 'next/dynamic';
 import { useEffect, useRef, useState } from 'react';
 import RecenterButton from './RecenterButton';
