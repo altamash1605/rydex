@@ -16,10 +16,9 @@ export default function RecenterButton({ onClick, visible = true }: Props) {
   useEffect(() => setMounted(true), []);
 
   const handleClick = () => {
-    console.log('🧭 Recenter clicked');
     setClicked(true);
     window.dispatchEvent(new CustomEvent('rydex-recenter'));
-    if (onClick) onClick();
+    if (onClick) onClick?.();
     setTimeout(() => setClicked(false), 300);
   };
 
@@ -31,23 +30,22 @@ export default function RecenterButton({ onClick, visible = true }: Props) {
       className={`
         fixed bottom-6 right-6
         z-[9999999]
-        bg-white text-gray-700 
-        rounded-full border-2 border-gray-700 
-        shadow-lg p-3
+        bg-white text-gray-800
+        border-2 border-gray-700 rounded-full
+        p-3 shadow-lg
         hover:bg-gray-100 active:scale-95
         transition-all
       `}
       style={{
         boxShadow: '0 3px 12px rgba(0,0,0,0.35)',
         background: clicked ? '#cce5ff' : 'white',
-        pointerEvents: 'auto',
       }}
       title="Recenter map"
     >
-      <Crosshair className="w-6 h-6 text-gray-700" />
+      <Crosshair className="w-6 h-6" />
     </button>
   );
 
-  // ✅ Mount into body instead of inside map
+  // ✅ Render outside map so it's never affected by map transforms
   return createPortal(button, document.body);
 }
