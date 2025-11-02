@@ -8,8 +8,10 @@ import ButtonBar from './ButtonBar';
 import { useGeoTracker } from './useGeoTracker';
 import { useLeafletLayers } from './useLeafletLayers';
 import type { Map as LeafletMap } from 'leaflet';
+import L from 'leaflet';
 import 'leaflet/dist/leaflet.css';
 
+// --- Lazy imports for React Leaflet ---
 const MapContainer = dynamic(() => import('react-leaflet').then(m => m.MapContainer), { ssr: false });
 const TileLayer = dynamic(() => import('react-leaflet').then(m => m.TileLayer), { ssr: false });
 const Marker = dynamic(() => import('react-leaflet').then(m => m.Marker), { ssr: false });
@@ -17,32 +19,49 @@ const Polyline = dynamic(() => import('react-leaflet').then(m => m.Polyline), { 
 
 export default function MapView() {
   const mapRef = useRef<LeafletMap | null>(null);
-  const { position, path } = useGeoTracker();
-  const { markerIcon } = useLeafletLayers();
-
+  const { currentPos, path } = useGeoTracker();
+  const leaflet = useLeafletLayers(); // still called to maintain map setup
   const [userPanned, setUserPanned] = useState(false);
 
+  // ✅ Local marker icon
+  const markerIcon = L.icon({
+    iconUrl: 'https://unpkg.com/leaflet@1.9.3/dist/images/marker-icon.png',
+    shadowUrl: 'https://unpkg.com/leaflet@1.9.3/dist/images/marker-shadow.png',
+    iconAnchor: [12, 41],
+  });
+
+  // --- Detect manual pan (disables auto-follow) ---
   useEffect(() => {
     const map = mapRef.current;
-    if (!map) return;
+    if (!map) return; // explicitly return void, not a function
 
     const handleMoveStart = () => setUserPanned(true);
     map.on('movestart', handleMoveStart);
-    return () => map.off('movestart', handleMoveStart);
+
+    // ✅ Cleanup
+    return () => {
+      map.off('movestart', handleMoveStart);
+    };
   }, []);
 
+  // --- Auto-follow user when not panned ---
   useEffect(() => {
     const map = mapRef.current;
-    if (map && position && !userPanned) {
-      map.setView([position.lat, position.lng]);
+    const coords = currentPos.current;
+    if (map && coords && !userPanned) {
+      map.setView([coords[0], coords[1]]);
     }
-  }, [position, userPanned]);
+  }, [currentPos.current, userPanned]);
+
+  const lat = currentPos.current?.[0] ?? 0;
+  const lng = currentPos.current?.[1] ?? 0;
 
   return (
     <div className="relative w-full h-full">
+      {/* Map container */}
       <MapContainer
         ref={mapRef as any}
-        center={[position?.lat || 0, position?.lng || 0]}
+        center={[lat, lng]}
         zoom={16}
         style={{ height: '100%', width: '100%' }}
         zoomControl={false}
@@ -52,24 +71,26 @@ export default function MapView() {
           attribution="&copy; OpenStreetMap contributors"
         />
 
-        {position && (
-          <Marker position={[position.lat, position.lng]} icon={markerIcon}></Marker>
+        {currentPos.current && (
+          <Marker position={[lat, lng]} icon={markerIcon}></Marker>
         )}
 
         {path.length > 1 && <Polyline positions={path} color="blue" />}
       </MapContainer>
 
-      {/* HUD - fixed top */}
+      {/* --- Floating UI Overlays --- */}
+
+      {/* Top HUD (full width with margins) */}
       <div className="absolute top-2 left-[5px] right-[5px] z-[1000]">
         <SpeedHUD />
       </div>
 
-      {/* Recenter Button - above ButtonBar, right side */}
+      {/* Recenter button (bottom-right, above button bar) */}
       <div className="absolute bottom-24 right-4 z-[1000]">
         <RecenterButton mapRef={mapRef} setUserPanned={setUserPanned} />
       </div>
 
-      {/* Button Bar - bottom center */}
+      {/* Button bar (bottom center) */}
       <div className="absolute bottom-2 left-0 right-0 z-[1000] flex justify-center">
         <ButtonBar />
       </div>
