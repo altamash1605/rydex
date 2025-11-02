@@ -65,7 +65,7 @@ export default function MapView() {
         >
           <TileLayer
             url="https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png"
-            attribution="&copy; <a href=\"https://carto.com/attributions\">CARTO</a> &copy; OpenStreetMap contributors"
+            attribution='&copy; <a href="https://carto.com/attributions">CARTO</a> &copy; OpenStreetMap contributors'
           />
           {currentPos.current && (
             <Marker position={[lat, lng]} icon={markerIcon}></Marker>
