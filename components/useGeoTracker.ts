@@ -1,19 +1,41 @@
 'use client';
 
 import { useEffect, useRef, useState } from 'react';
+import {
+  initializeLocationStore,
+  getLocationState,
+  recordLocation,
+  reloadLocationStoreFromStorage,
+  subscribeToLocationStore,
+  type LatLng,
+} from '../utils/locationStore';
+import { startBackgroundTracking } from '../utils/backgroundLocation';
 
 // Optional dynamic import so web build doesn’t break if Capacitor isn’t present
 let Geolocation: any = null;
-(async () => {
-  try {
-    const mod = await import('@capacitor/geolocation');
-    Geolocation = mod.Geolocation;
-  } catch {
-    // Running on web – ignore
-  }
-})();
+let geolocationLoadPromise: Promise<void> | null = null;
 
-type LatLng = [number, number];
+function ensureCapacitorGeolocation(): Promise<void> {
+  if (geolocationLoadPromise) {
+    return geolocationLoadPromise;
+  }
+  if (typeof window === 'undefined') {
+    return Promise.resolve();
+  }
+
+  geolocationLoadPromise = import('@capacitor/geolocation')
+    .then((mod) => {
+      Geolocation = mod.Geolocation;
+    })
+    .catch(() => {
+      Geolocation = undefined;
+    })
+    .finally(() => {
+      geolocationLoadPromise = null;
+    });
+
+  return geolocationLoadPromise;
+}
 
 export function useGeoTracker() {
   const [path, setPath] = useState<LatLng[]>([]);
@@ -22,21 +44,62 @@ export function useGeoTracker() {
 
   useEffect(() => {
     let isMounted = true;
+    let unsubscribe: (() => void) | undefined;
+
+    (async () => {
+      await initializeLocationStore();
+      if (!isMounted) return;
+
+      const initialState = getLocationState();
+      setPath(initialState.path);
+      currentPos.current = initialState.current;
+
+      unsubscribe = subscribeToLocationStore((state) => {
+        if (!isMounted) return;
+        setPath(state.path);
+        currentPos.current = state.current;
+      });
+    })();
+
+    return () => {
+      isMounted = false;
+      unsubscribe?.();
+    };
+  }, []);
+
+  useEffect(() => {
+    const handleVisibility = async () => {
+      if (document.visibilityState === 'visible') {
+        const snapshot = await reloadLocationStoreFromStorage();
+        setPath(snapshot.path);
+        currentPos.current = snapshot.current;
+      }
+    };
+
+    const handleWindowFocus = async () => {
+      const snapshot = await reloadLocationStoreFromStorage();
+      setPath(snapshot.path);
+      currentPos.current = snapshot.current;
+    };
+
+    document.addEventListener('visibilitychange', handleVisibility);
+    window.addEventListener('focus', handleWindowFocus);
+
+    return () => {
+      document.removeEventListener('visibilitychange', handleVisibility);
+      window.removeEventListener('focus', handleWindowFocus);
+    };
+  }, []);
+
+  useEffect(() => {
+    let isMounted = true;
 
     async function startWatch() {
       try {
+        await ensureCapacitorGeolocation();
         const handlePos = (latitude: number, longitude: number, accuracy: number) => {
-          // Ignore bad accuracy readings
-          if (accuracy > 20) return;
-          currentPos.current = [latitude, longitude];
-          // Avoid over-rendering by using functional state update
-          setPath((p) => {
-            const last = p[p.length - 1];
-            if (!last || Math.hypot(latitude - last[0], longitude - last[1]) > 0.00001) {
-              return [...p, [latitude, longitude]];
-            }
-            return p;
-          });
+          if (!isMounted) return;
+          void recordLocation([latitude, longitude], accuracy);
         };
 
         if (Geolocation) {
@@ -71,7 +134,8 @@ export function useGeoTracker() {
       }
     }
 
-    startWatch();
+    void startWatch();
+    void startBackgroundTracking();
 
     return () => {
       isMounted = false;

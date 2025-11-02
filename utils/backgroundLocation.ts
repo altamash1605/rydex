@@ -1,42 +1,88 @@
-import BackgroundGeolocation from '@capacitor-community/background-geolocation';
+import { Capacitor, registerPlugin } from '@capacitor/core';
+import { recordLocation } from './locationStore';
 
-// 👇 We alias it to "BG" to make TypeScript happy even when running on web.
-const BG: any = BackgroundGeolocation;
+type BackgroundPlugin = {
+  requestPermissions?: () => Promise<void>;
+  addWatcher: (
+    options: Record<string, unknown>,
+    callback: (location: any, error: any) => void,
+  ) => Promise<string>;
+  removeWatcher?: (options: { id: string }) => Promise<void>;
+};
+
+const BackgroundGeolocation = registerPlugin<BackgroundPlugin>('BackgroundGeolocation', {
+  web: () => ({
+    requestPermissions: async () => undefined,
+    addWatcher: async () => {
+      console.warn('Background geolocation is not available on the web.');
+      return 'web-noop';
+    },
+    removeWatcher: async () => undefined,
+  }),
+});
+
+let watcherId: string | null = null;
 
 /**
  * Start background location tracking.
  * Requests permission if needed, then begins continuous tracking.
  */
 export async function startBackgroundTracking() {
+  if (watcherId) {
+    return;
+  }
+
+  if (!Capacitor.isNativePlatform()) {
+    return;
+  }
+
+  if (!Capacitor.isPluginAvailable('BackgroundGeolocation')) {
+    return;
+  }
+
   try {
     // Request permissions only if available (prevents errors during web builds)
-    if (BG?.requestPermissions) {
-      await BG.requestPermissions();
+    if (BackgroundGeolocation?.requestPermissions) {
+      await BackgroundGeolocation.requestPermissions();
     }
 
     // Add watcher for location updates
-    await BG.addWatcher(
+    watcherId = await BackgroundGeolocation.addWatcher(
       {
-        id: 'rydex-tracker', // Optional watcher ID for cleanup
+        // Passing an ID is supported by the plugin even though the type definition omits it.
+        id: 'rydex-tracker',
         backgroundMessage: 'Rydex is tracking your ride…',
         backgroundTitle: 'Rydex Tracking',
         distanceFilter: 10, // meters between updates
-      },
+        requestPermissions: true,
+      } as any,
       async (location: any, error: any) => {
         if (error) {
           console.error('Background location error:', error);
           return;
         }
 
-        // Called every time a location update occurs
-        console.log('Background location:', location);
+        if (!location) {
+          return;
+        }
 
-        // ✅ TODO: send to Supabase or your backend if desired
-        // await logRide(location); // Example placeholder
+        const { latitude, longitude, accuracy } = location;
+        if (
+          typeof latitude !== 'number' ||
+          typeof longitude !== 'number' ||
+          Number.isNaN(latitude) ||
+          Number.isNaN(longitude)
+        ) {
+          return;
+        }
+
+        await recordLocation([latitude, longitude], accuracy);
+        console.log('Background location:', location);
       }
     );
   } catch (err) {
     console.error('Failed to start background tracking:', err);
+    watcherId = null;
   }
 }
 
@@ -45,9 +91,18 @@ export async function startBackgroundTracking() {
  * Removes the active watcher if it exists.
  */
 export async function stopBackgroundTracking() {
+  if (!Capacitor.isNativePlatform()) {
+    return;
+  }
+
+  if (!Capacitor.isPluginAvailable('BackgroundGeolocation')) {
+    return;
+  }
+
   try {
-    if (BG?.removeWatcher) {
-      await BG.removeWatcher({ id: 'rydex-tracker' });
+    if (watcherId && BackgroundGeolocation?.removeWatcher) {
+      await BackgroundGeolocation.removeWatcher({ id: watcherId });
+      watcherId = null;
       console.log('Stopped background tracking');
     }
   } catch (err) {

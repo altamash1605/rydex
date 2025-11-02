@@ -28,6 +28,9 @@ export default function MapView() {
   const programmaticResetTimeout = useRef<number | null>(null);
   const hasAutoCentered = useRef(false);
   const [mapReady, setMapReady] = useState(false);
+  const [markerPosition, setMarkerPosition] = useState<[number, number] | null>(null);
+  const markerAnimationFrame = useRef<number | null>(null);
+  const markerPositionRef = useRef<[number, number] | null>(null);
 
   const markProgrammaticMove = () => {
     isProgrammaticMove.current = true;
@@ -50,6 +53,74 @@ export default function MapView() {
       }),
     [],
   );
+
+  useEffect(() => {
+    markerPositionRef.current = markerPosition;
+  }, [markerPosition]);
+
+  useEffect(() => {
+    return () => {
+      if (markerAnimationFrame.current != null) {
+        window.cancelAnimationFrame(markerAnimationFrame.current);
+      }
+    };
+  }, []);
+
+  const animateMarker = useCallback(
+    (target: [number, number]) => {
+      if (!target) {
+        return;
+      }
+
+      const start = markerPositionRef.current;
+      if (!start) {
+        markerPositionRef.current = target;
+        setMarkerPosition(target);
+        return;
+      }
+
+      if (start[0] === target[0] && start[1] === target[1]) {
+        return;
+      }
+
+      if (markerAnimationFrame.current != null) {
+        window.cancelAnimationFrame(markerAnimationFrame.current);
+      }
+
+      const startTime = performance.now();
+      const duration = 650;
+
+      const step = (now: number) => {
+        const elapsed = now - startTime;
+        const t = Math.min(1, elapsed / duration);
+        const eased = 1 - Math.pow(1 - t, 3);
+        const nextLat = start[0] + (target[0] - start[0]) * eased;
+        const nextLng = start[1] + (target[1] - start[1]) * eased;
+        const nextPos: [number, number] = [nextLat, nextLng];
+        markerPositionRef.current = nextPos;
+        setMarkerPosition(nextPos);
+
+        if (t < 1) {
+          markerAnimationFrame.current = window.requestAnimationFrame(step);
+        } else {
+          markerAnimationFrame.current = null;
+          markerPositionRef.current = target;
+          setMarkerPosition(target);
+        }
+      };
+
+      markerAnimationFrame.current = window.requestAnimationFrame(step);
+    },
+    [],
+  );
+
+  useEffect(() => {
+    const target = currentPos.current;
+    if (!target) {
+      return;
+    }
+    animateMarker(target);
+  }, [path, currentPos, animateMarker]);
 
   // Detect manual pan
   useEffect(() => {
@@ -128,30 +199,53 @@ export default function MapView() {
     }
 
     map.doubleClickZoom.disable();
+    // Allow fractional zoom levels so the gesture can smoothly interpolate without
+    // Leaflet snapping back to integer zooms (which causes the "steppy" feel).
+    const previousZoomSnap = map.options.zoomSnap;
+    const previousZoomDelta = map.options.zoomDelta;
+    map.options.zoomSnap = 0;
+    map.options.zoomDelta = 0.01;
 
     const container = map.getContainer();
     let lastTapTime = 0;
     let gestureActive = false;
+    let movedDuringGesture = false;
     let initialY = 0;
     let initialZoom = map.getZoom();
+    let anchorPoint: L.Point | null = null;
     let draggingDisabledForGesture = false;
     const sensitivity = 120;
 
+    const endGesture = () => {
+      gestureActive = false;
+      movedDuringGesture = false;
+      anchorPoint = null;
+      initialY = 0;
+      initialZoom = map.getZoom();
+      if (draggingDisabledForGesture && map.dragging && !map.dragging.enabled()) {
+        map.dragging.enable();
+      }
+      draggingDisabledForGesture = false;
+    };
+
     const handleTouchStart = (event: TouchEvent) => {
       if (event.touches.length !== 1) {
-        if (gestureActive && draggingDisabledForGesture && map.dragging && !map.dragging.enabled()) {
-          map.dragging.enable();
-        }
-        gestureActive = false;
-        draggingDisabledForGesture = false;
+        endGesture();
         return;
       }
 
-      const now = Date.now();
-      if (now - lastTapTime < 300) {
-        gestureActive = true;
-        initialY = event.touches[0].clientY;
+      const now = performance.now();
+      const delta = now - lastTapTime;
+      lastTapTime = now;
+
+      if (delta < 300) {
+        const touch = event.touches[0];
+        const rect = container.getBoundingClientRect();
+        anchorPoint = L.point(touch.clientX - rect.left, touch.clientY - rect.top);
+        initialY = touch.clientY;
         initialZoom = map.getZoom();
+        movedDuringGesture = false;
+        gestureActive = true;
         if (map.dragging && map.dragging.enabled()) {
           map.dragging.disable();
           draggingDisabledForGesture = true;
@@ -159,14 +253,10 @@ export default function MapView() {
           draggingDisabledForGesture = false;
         }
         event.preventDefault();
+        event.stopPropagation();
       } else {
-        gestureActive = false;
-        if (draggingDisabledForGesture && map.dragging && !map.dragging.enabled()) {
-          map.dragging.enable();
-        }
-        draggingDisabledForGesture = false;
+        endGesture();
       }
-      lastTapTime = now;
     };
 
     const handleTouchMove = (event: TouchEvent) => {
@@ -180,33 +270,36 @@ export default function MapView() {
       const minZoom = map.getMinZoom();
       const maxZoom = map.getMaxZoom();
       const newZoom = Math.max(minZoom, Math.min(maxZoom, targetZoom));
+
       if (!Number.isNaN(newZoom)) {
-        map.setZoom(newZoom, { animate: false });
+        movedDuringGesture = true;
+        if (anchorPoint) {
+          map.setZoomAround(anchorPoint, newZoom, { animate: false });
+        } else {
+          map.setZoom(newZoom, { animate: false });
+        }
       }
+
       event.preventDefault();
+      event.stopPropagation();
     };
 
     const handleTouchEnd = (event: TouchEvent) => {
       if (!gestureActive) {
         return;
       }
-      gestureActive = false;
-      if (draggingDisabledForGesture && map.dragging && !map.dragging.enabled()) {
-        map.dragging.enable();
+
+      if (!movedDuringGesture) {
+        map.zoomIn(1, { animate: true });
       }
-      draggingDisabledForGesture = false;
+
+      endGesture();
       event.preventDefault();
+      event.stopPropagation();
     };
 
     const handleTouchCancel = () => {
-      if (!gestureActive) {
-        return;
-      }
-      gestureActive = false;
-      if (draggingDisabledForGesture && map.dragging && !map.dragging.enabled()) {
-        map.dragging.enable();
-      }
-      draggingDisabledForGesture = false;
+      endGesture();
     };
 
     container.addEventListener('touchstart', handleTouchStart, { passive: false });
@@ -219,9 +312,10 @@ export default function MapView() {
       container.removeEventListener('touchmove', handleTouchMove);
       container.removeEventListener('touchend', handleTouchEnd);
       container.removeEventListener('touchcancel', handleTouchCancel);
-      if (draggingDisabledForGesture && map.dragging && !map.dragging.enabled()) {
-        map.dragging.enable();
-      }
+      endGesture();
+      map.options.zoomSnap = previousZoomSnap;
+      map.options.zoomDelta = previousZoomDelta;
+      map.doubleClickZoom.enable();
     };
   }, [mapReady]);
 
@@ -240,6 +334,7 @@ export default function MapView() {
 
   const lat = currentPos.current?.[0] ?? 0;
   const lng = currentPos.current?.[1] ?? 0;
+  const markerPoint = markerPosition ?? (currentPos.current ? [lat, lng] : null);
 
   return (
     <div className="relative h-full w-full overflow-hidden bg-[#111827]">
@@ -256,15 +351,13 @@ export default function MapView() {
             url="https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png"
             attribution='&copy; <a href="https://carto.com/attributions">CARTO</a> &copy; OpenStreetMap contributors'
           />
-          {currentPos.current && (
-            <Marker position={[lat, lng]} icon={markerIcon}></Marker>
-          )}
+          {markerPoint && <Marker position={markerPoint} icon={markerIcon}></Marker>}
           {showPath && path.length > 1 && <Polyline positions={path} color="#fb923c" weight={4} />}
         </MapContainer>
       </div>
 
       {/* Atmospheric layers */}
-      <div className="pointer-events-none absolute inset-x-0 top-0 h-[30%] bg-[linear-gradient(180deg,rgba(17,24,39,0.85)_0%,rgba(17,24,39,0.25)_70%,rgba(17,24,39,0)_100%)]" />
+      <div className="pointer-events-none absolute inset-x-0 top-0 h-[24%] bg-[linear-gradient(180deg,rgba(17,24,39,0.85)_0%,rgba(17,24,39,0.25)_70%,rgba(17,24,39,0)_100%)]" />
       <div className="pointer-events-none absolute inset-x-0 bottom-0 h-[45%] bg-[linear-gradient(180deg,rgba(17,24,39,0)_0%,rgba(17,24,39,0.55)_45%,rgba(17,24,39,0.9)_100%)]" />
 
       {/* --- Floating Overlays --- */}
@@ -272,7 +365,7 @@ export default function MapView() {
       {/* Top HUD */}
       <div
         className="rydex-overlay pointer-events-none absolute inset-x-0 top-0 flex justify-center px-6"
-        style={{ paddingTop: 'calc(env(safe-area-inset-top, 1.5rem) + 1.5rem)' }}
+        style={{ paddingTop: 'calc(env(safe-area-inset-top, 1rem) + 1rem)' }}
       >
         <div className="pointer-events-auto w-full max-w-xl">
           <SpeedHUD />
