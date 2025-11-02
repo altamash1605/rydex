@@ -30,3 +30,25 @@ body {
   overscroll-behavior: none;
   overflow-x: hidden;
 }
+
+
+/* --- Fix overlay visibility above Leaflet map --- */
+.leaflet-container,
+.leaflet-pane,
+.leaflet-tile,
+.leaflet-overlay-pane,
+.leaflet-marker-pane {
+  z-index: 0 !important; /* push map layers behind overlays */
+}
+
+.rydex-overlay {
+  position: absolute;
+  z-index: 10000 !important; /* always above the map */
+}
+
+/* Optional: keep overlay within safe area on mobile */
+@supports (padding: env(safe-area-inset-bottom)) {
+  .rydex-overlay-bottom {
+    padding-bottom: env(safe-area-inset-bottom);
+  }
+}

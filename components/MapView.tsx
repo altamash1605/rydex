@@ -11,7 +11,6 @@ import type { Map as LeafletMap } from 'leaflet';
 import L from 'leaflet';
 import 'leaflet/dist/leaflet.css';
 
-// --- Lazy imports for React Leaflet ---
 const MapContainer = dynamic(() => import('react-leaflet').then(m => m.MapContainer), { ssr: false });
 const TileLayer = dynamic(() => import('react-leaflet').then(m => m.TileLayer), { ssr: false });
 const Marker = dynamic(() => import('react-leaflet').then(m => m.Marker), { ssr: false });
@@ -23,27 +22,24 @@ export default function MapView() {
   const leaflet = useLeafletLayers();
   const [userPanned, setUserPanned] = useState(false);
 
-  // ✅ Local marker icon
   const markerIcon = L.icon({
     iconUrl: 'https://unpkg.com/leaflet@1.9.3/dist/images/marker-icon.png',
     shadowUrl: 'https://unpkg.com/leaflet@1.9.3/dist/images/marker-shadow.png',
     iconAnchor: [12, 41],
   });
 
-  // --- Detect manual pan ---
+  // Detect manual pan
   useEffect(() => {
     const map = mapRef.current;
     if (!map) return;
-
     const handleMoveStart = () => setUserPanned(true);
     map.on('movestart', handleMoveStart);
-
     return () => {
       map.off('movestart', handleMoveStart);
     };
   }, []);
 
-  // --- Auto-follow user when not manually panned ---
+  // Auto-follow
   useEffect(() => {
     const map = mapRef.current;
     const coords = currentPos.current;
@@ -57,7 +53,7 @@ export default function MapView() {
 
   return (
     <div className="relative w-full h-full overflow-hidden bg-black">
-      {/* MAP LAYER */}
+      {/* Map layer */}
       <MapContainer
         ref={mapRef as any}
         center={[lat, lng]}
@@ -69,28 +65,26 @@ export default function MapView() {
           url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
           attribution="&copy; OpenStreetMap contributors"
         />
-
         {currentPos.current && (
           <Marker position={[lat, lng]} icon={markerIcon}></Marker>
         )}
-
         {path.length > 1 && <Polyline positions={path} color="blue" />}
       </MapContainer>
 
-      {/* --- FLOATING UI LAYER --- */}
+      {/* --- Floating Overlays --- */}
 
-      {/* HUD (top bar) */}
-      <div className="absolute top-3 left-3 right-3 z-[1000]">
+      {/* Top HUD */}
+      <div className="rydex-overlay absolute top-3 left-3 right-3">
         <SpeedHUD />
       </div>
 
-      {/* Recenter button (bottom-right corner) */}
-      <div className="absolute bottom-24 right-4 z-[1000]">
+      {/* Recenter Button */}
+      <div className="rydex-overlay absolute bottom-24 right-4">
         <RecenterButton mapRef={mapRef} setUserPanned={setUserPanned} />
       </div>
 
-      {/* Bottom main action bar */}
-      <div className="absolute bottom-3 left-3 right-3 z-[1000] flex justify-center">
+      {/* Bottom Button */}
+      <div className="rydex-overlay rydex-overlay-bottom absolute bottom-3 left-3 right-3 flex justify-center">
         <ButtonBar />
       </div>
     </div>
