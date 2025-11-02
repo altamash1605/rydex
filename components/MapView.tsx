@@ -20,7 +20,7 @@ const Polyline = dynamic(() => import('react-leaflet').then(m => m.Polyline), { 
 export default function MapView() {
   const mapRef = useRef<LeafletMap | null>(null);
   const { currentPos, path } = useGeoTracker();
-  const leaflet = useLeafletLayers(); // still called to maintain map setup
+  const leaflet = useLeafletLayers();
   const [userPanned, setUserPanned] = useState(false);
 
   // ✅ Local marker icon
@@ -30,21 +30,20 @@ export default function MapView() {
     iconAnchor: [12, 41],
   });
 
-  // --- Detect manual pan (disables auto-follow) ---
+  // --- Detect manual pan ---
   useEffect(() => {
     const map = mapRef.current;
-    if (!map) return; // explicitly return void, not a function
+    if (!map) return;
 
     const handleMoveStart = () => setUserPanned(true);
     map.on('movestart', handleMoveStart);
 
-    // ✅ Cleanup
     return () => {
       map.off('movestart', handleMoveStart);
     };
   }, []);
 
-  // --- Auto-follow user when not panned ---
+  // --- Auto-follow user when not manually panned ---
   useEffect(() => {
     const map = mapRef.current;
     const coords = currentPos.current;
@@ -57,8 +56,8 @@ export default function MapView() {
   const lng = currentPos.current?.[1] ?? 0;
 
   return (
-    <div className="relative w-full h-full">
-      {/* Map container */}
+    <div className="relative w-full h-full overflow-hidden bg-black">
+      {/* MAP LAYER */}
       <MapContainer
         ref={mapRef as any}
         center={[lat, lng]}
@@ -78,20 +77,20 @@ export default function MapView() {
         {path.length > 1 && <Polyline positions={path} color="blue" />}
       </MapContainer>
 
-      {/* --- Floating UI Overlays --- */}
+      {/* --- FLOATING UI LAYER --- */}
 
-      {/* Top HUD (full width with margins) */}
-      <div className="absolute top-2 left-[5px] right-[5px] z-[1000]">
+      {/* HUD (top bar) */}
+      <div className="absolute top-3 left-3 right-3 z-[1000]">
         <SpeedHUD />
       </div>
 
-      {/* Recenter button (bottom-right, above button bar) */}
+      {/* Recenter button (bottom-right corner) */}
       <div className="absolute bottom-24 right-4 z-[1000]">
         <RecenterButton mapRef={mapRef} setUserPanned={setUserPanned} />
       </div>
 
-      {/* Button bar (bottom center) */}
-      <div className="absolute bottom-2 left-0 right-0 z-[1000] flex justify-center">
+      {/* Bottom main action bar */}
+      <div className="absolute bottom-3 left-3 right-3 z-[1000] flex justify-center">
         <ButtonBar />
       </div>
     </div>
