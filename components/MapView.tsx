@@ -13,8 +13,6 @@ import { useLeafletLayers } from './useLeafletLayers';
 import type { Map as LeafletMap } from 'leaflet';
 import L from 'leaflet';
 
-
-
 const MapContainer = dynamic(() => import('react-leaflet').then(m => m.MapContainer), { ssr: false });
 const TileLayer = dynamic(() => import('react-leaflet').then(m => m.TileLayer), { ssr: false });
 const Marker = dynamic(() => import('react-leaflet').then(m => m.Marker), { ssr: false });
@@ -216,6 +214,10 @@ export default function MapView() {
       return;
     }
 
+    // NEW: prevent page scroll/zoom fighting this gesture
+    const prevTouchAction = container.style.touchAction;
+    container.style.touchAction = 'none';
+
     let lastTapTime = 0;
     let pointerId: number | null = null;
     let gestureActive = false;
@@ -231,6 +233,22 @@ export default function MapView() {
     const sensitivity = 240;
     const minZoom = map.getMinZoom();
     const maxZoom = map.getMaxZoom();
+
+    // keep preview visible & commit in small steps
+    const PREVIEW_MIN = 0.6;
+    const PREVIEW_MAX = 2.0;
+    const COMMIT_STEP = 0.20;
+
+    // accumulators for smooth zoom
+    let zoomAccumulator = 0;
+    let lastYDuringGesture = 0;
+
+    // NEW: double-tap detection window & spatial tolerance + single-finger guard
+    const TAP_MIN_MS = 50;
+    const TAP_MAX_MS = 350;
+    const TAP_MOVE_TOL = 18; // px
+    let lastTapPoint: L.Point | null = null;
+    let activeTouchCount = 0;
 
     const cancelAnimation = () => {
       if (rafId != null) {
@@ -304,18 +322,21 @@ export default function MapView() {
       draggingDisabledForGesture = false;
 
       if (!commit) {
+        // Cancel path
         animateBackToIdentity(false);
         anchorPoint = null;
         anchorLatLng = null;
         lastScale = 1;
         movedDuringGesture = false;
         startZoom = map.getZoom();
+        zoomAccumulator = 0;
         return;
       }
 
+      // Commit path
       const targetZoom = Math.max(
         minZoom,
-        Math.min(maxZoom, startZoom + Math.log2(lastScale || 1)),
+        Math.min(maxZoom, startZoom + zoomAccumulator),
       );
 
       animateBackToIdentity(true);
@@ -329,33 +350,48 @@ export default function MapView() {
         }
       });
 
+      // Reset gesture state
       anchorPoint = null;
       anchorLatLng = null;
       lastScale = 1;
       movedDuringGesture = false;
       startZoom = map.getZoom();
+      zoomAccumulator = 0;
     };
 
     const handlePointerDown = (event: PointerEvent) => {
+      if (event.pointerType === 'touch') activeTouchCount++;
       if (event.pointerType !== 'touch') {
-        lastTapTime = performance.now();
-        return;
+        return; // do NOT modify lastTapTime for mouse/stylus
       }
 
       const now = performance.now();
-      const delta = now - lastTapTime;
-      lastTapTime = now;
+      const rect = container.getBoundingClientRect();
+      const thisTapPoint = L.point(event.clientX - rect.left, event.clientY - rect.top);
 
-      if (delta > 40 && delta < 320) {
+      const delta = now - lastTapTime;
+      const inTimeWindow = delta >= TAP_MIN_MS && delta <= TAP_MAX_MS;
+      const inSpatialWindow = lastTapPoint
+        ? lastTapPoint.distanceTo(thisTapPoint) <= TAP_MOVE_TOL
+        : false;
+
+      if (activeTouchCount === 1 && inTimeWindow && inSpatialWindow) {
+        // Start the special gesture
         pointerId = event.pointerId;
-        const rect = container.getBoundingClientRect();
-        anchorPoint = L.point(event.clientX - rect.left, event.clientY - rect.top);
+        anchorPoint = thisTapPoint;
         anchorLatLng = map.containerPointToLatLng(anchorPoint);
         startY = event.clientY;
         startZoom = map.getZoom();
         lastScale = 1;
         movedDuringGesture = false;
         gestureActive = true;
+
+        // ensure preview scales around the exact touch pixel
+        mapPane.style.transformOrigin = `${anchorPoint.x}px ${anchorPoint.y}px`;
+
+        // init smooth-zoom accumulators
+        lastYDuringGesture = event.clientY;
+        zoomAccumulator = 0;
 
         if (map.dragging && map.dragging.enabled()) {
           map.dragging.disable();
@@ -372,31 +408,59 @@ export default function MapView() {
           }
         }
 
+        // reset the double-tap clock so a third tap doesn’t chain
+        lastTapTime = 0;
+        lastTapPoint = null;
+
         event.preventDefault();
         event.stopPropagation();
-      } else if (gestureActive) {
-        endGesture(false);
-      }
-    };
-
-    const handlePointerMove = (event: PointerEvent) => {
-      if (!gestureActive || event.pointerId !== pointerId) {
         return;
       }
 
-      const deltaY = startY - event.clientY;
-      const zoomDelta = deltaY / sensitivity;
-      const rawScale = Math.pow(2, zoomDelta);
-      const minScale = Math.pow(2, minZoom - startZoom);
-      const maxScale = Math.pow(2, maxZoom - startZoom);
-      const clampedScale = Math.max(minScale, Math.min(maxScale, rawScale));
-      lastScale = clampedScale;
+      // Otherwise: record this as potential first tap
+      lastTapTime = now;
+      lastTapPoint = thisTapPoint;
+    };
 
-      if (!movedDuringGesture && Math.abs(Math.log2(clampedScale)) > 0.01) {
+    const handlePointerMove = (event: PointerEvent) => {
+      if (!gestureActive || event.pointerId !== pointerId) return;
+
+      // down = positive (zoom in), up = negative (zoom out)
+      const dy = event.clientY - lastYDuringGesture;
+      lastYDuringGesture = event.clientY;
+
+      // convert to fractional zoom levels
+      const dz = dy / sensitivity; // 240px ≈ 1 zoom level
+      zoomAccumulator += dz;
+
+      if (!movedDuringGesture && Math.abs(zoomAccumulator) > 0.01) {
         movedDuringGesture = true;
       }
 
-      applyVisualScale(clampedScale);
+      // visual preview: keep small so map never vanishes
+      const previewScale = Math.pow(2, zoomAccumulator);
+      const safePreview = Math.max(PREVIEW_MIN, Math.min(PREVIEW_MAX, previewScale));
+      lastScale = safePreview;
+      applyVisualScale(safePreview);
+
+      // continuously commit small real zoom steps, pinned to the touch anchor
+      while (Math.abs(zoomAccumulator) >= COMMIT_STEP) {
+        const step = Math.sign(zoomAccumulator) * COMMIT_STEP;
+        const nextZoom = Math.max(minZoom, Math.min(maxZoom, startZoom + step));
+
+        if (anchorLatLng) {
+          map.setZoomAround(anchorLatLng, nextZoom, { animate: false });
+        } else {
+          map.setZoom(nextZoom, { animate: false });
+        }
+
+        // reset baseline so preview stays tiny and stable
+        startZoom = map.getZoom();
+        zoomAccumulator -= step;
+
+        const rescaled = Math.pow(2, zoomAccumulator);
+        applyVisualScale(Math.max(PREVIEW_MIN, Math.min(PREVIEW_MAX, rescaled)));
+      }
 
       event.preventDefault();
       event.stopPropagation();
@@ -420,10 +484,12 @@ export default function MapView() {
     };
 
     const handlePointerUp = (event: PointerEvent) => {
+      if (event.pointerType === 'touch') activeTouchCount = Math.max(0, activeTouchCount - 1);
       finishGesture(event);
     };
 
     const handlePointerCancel = (event: PointerEvent) => {
+      if (event.pointerType === 'touch') activeTouchCount = Math.max(0, activeTouchCount - 1);
       if (!gestureActive || (pointerId != null && event.pointerId !== pointerId)) {
         return;
       }
@@ -438,6 +504,9 @@ export default function MapView() {
     container.addEventListener('pointerleave', handlePointerCancel);
 
     return () => {
+      // restore touch-action
+      container.style.touchAction = prevTouchAction;
+
       cancelAnimation();
       container.removeEventListener('pointerdown', handlePointerDown);
       container.removeEventListener('pointermove', handlePointerMove);
