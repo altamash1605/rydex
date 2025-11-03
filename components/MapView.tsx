@@ -230,7 +230,7 @@ export default function MapView() {
     let rafId: number | null = null;
     let draggingDisabledForGesture = false;
 
-    const sensitivity = 240;
+    const sensitivity = 200;
     const minZoom = map.getMinZoom();
     const maxZoom = map.getMaxZoom();
 
