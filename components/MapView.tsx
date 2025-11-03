@@ -12,6 +12,8 @@ import { useGeoTracker } from './useGeoTracker';
 import { useLeafletLayers } from './useLeafletLayers';
 import type { Map as LeafletMap } from 'leaflet';
 import L from 'leaflet';
+import TimerPill from './TimerPill';
+
 
 const MapContainer = dynamic(() => import('react-leaflet').then(m => m.MapContainer), { ssr: false });
 const TileLayer = dynamic(() => import('react-leaflet').then(m => m.TileLayer), { ssr: false });
@@ -468,6 +470,7 @@ export default function MapView() {
 
   return (
     <div className="relative h-full w-full overflow-hidden bg-[#111827]">
+      <TimerPill />
       {/* Map layer */}
       <div className="absolute inset-0">
         <MapContainer
