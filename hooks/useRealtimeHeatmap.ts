@@ -1,90 +1,120 @@
+// hooks/useRealtimeHeatmap.ts
 import { useEffect, useRef, useState } from "react";
 import { supabase } from "@/utils/supabaseClient";
 
 type HeatPoint = { lat: number; lng: number; ts: number };
 
-// Add a very small random jitter (~±0.0005° ≈ ±50 m)
+// Small random jitter (~±0.0005° ≈ ±50 m)
 function jitterCoord(value: number) {
   const jitter = (Math.random() - 0.5) * 0.001; // ±0.0005°
   return value + jitter;
 }
 
-// Expiry & batching settings
-const EXPIRY_MS = 15000; // remove after 15 s
-const FLUSH_INTERVAL = 2000; // apply incoming points every 2 s
-const CLEANUP_INTERVAL = 5000; // prune expired points every 5 s
+// Settings
+const EXPIRY_MS = 15000;        // remove after 15 s
+const CLEANUP_INTERVAL = 5000;  // prune expired points every 5 s
+const FETCH_INTERVAL = 5000;    // poll aggregated tiles every 5 s
+const LOOKBACK_MIN = 20;        // fetch analytics rows from last N minutes
+const MAX_POINTS = 300;         // cap rendered points (after expansion)
 
 export function useRealtimeHeatmap(position?: { lat: number; lng: number }) {
   const [points, setPoints] = useState<HeatPoint[]>([]);
-  const channelRef = useRef<ReturnType<typeof supabase.channel> | null>(null);
-  const bufferRef = useRef<HeatPoint[]>([]);
-  const lastSendRef = useRef(0);
+  const fetchingRef = useRef(false);
 
   useEffect(() => {
-    if (!channelRef.current) {
-      const channel = supabase.channel("driver_heat");
-      channelRef.current = channel;
+    let isMounted = true;
 
-      // Buffer incoming points instead of setting state immediately
-      channel.on("broadcast", { event: "ping" }, (payload) => {
-        const now = Date.now();
-        const incoming = payload.payload as { lat: number; lng: number };
-        bufferRef.current.push({ ...incoming, ts: now });
-      });
-
-      channel.subscribe();
+    // 🟡 Helper: expand one aggregated tile into N jittered points
+    function expandTile(avgLat: number, avgLng: number, driverCount: number) {
+      // Cap how many points we synthesize per tile to avoid overdraw
+      const n = Math.min(Math.max(driverCount, 1), 6);
+      const out: HeatPoint[] = [];
+      const now = Date.now();
+      for (let i = 0; i < n; i++) {
+        out.push({
+          lat: jitterCoord(avgLat),
+          lng: jitterCoord(avgLng),
+          ts: now,
+        });
+      }
+      return out;
     }
 
-    const channel = channelRef.current;
+    // 🟢 Poll aggregated analytics (last LOOKBACK_MIN minutes)
+    async function fetchAggregated() {
+      if (fetchingRef.current) return;
+      fetchingRef.current = true;
+      try {
+        const sinceISO = new Date(Date.now() - LOOKBACK_MIN * 60_000).toISOString();
+        const { data, error } = await supabase
+          .from("driver_analytics")
+          .select("avg_lat, avg_lng, driver_count, window_end")
+          .gte("window_end", sinceISO)
+          .order("window_end", { ascending: false })
+          .limit(2000); // cheap guard
 
-    // 🟢 Broadcast my location (debounced)
-    const sendInterval = setInterval(() => {
-      if (!position) return;
-
-      const now = Date.now();
-      if (now - lastSendRef.current < 5000) return; // 5 s debounce
-      lastSendRef.current = now;
-
-      // use exact location with ±50 m jitter
-      const adjusted = {
-        lat: jitterCoord(position.lat),
-        lng: jitterCoord(position.lng),
-      };
-
-      channel
-        ?.send({ type: "broadcast", event: "ping", payload: adjusted })
-        .catch((err) => console.warn("Supabase send error:", err));
-    }, 1000);
-
-    // 🧮 Flush buffered points to state every few seconds
-    const flushInterval = setInterval(() => {
-      if (!bufferRef.current.length) return;
-
-      setPoints((prev) => {
-        const combined = [...prev, ...bufferRef.current];
-        bufferRef.current = [];
-
-        // Remove expired + dedupe + cap to 100 points
-        const now = Date.now();
-        const unique: Record<string, HeatPoint> = {};
-        for (const p of combined) {
-          if (now - p.ts < EXPIRY_MS) unique[`${p.lat.toFixed(5)},${p.lng.toFixed(5)}`] = p;
+        if (error) {
+          // Soft-fail: keep previous points
+          console.warn("fetchAggregated error:", error.message);
+          return;
         }
-        return Object.values(unique).slice(-100);
-      });
-    }, FLUSH_INTERVAL);
+
+        const now = Date.now();
+        const synthesized: HeatPoint[] = [];
+
+        // Expand each aggregated row into a few display points
+        for (const row of data ?? []) {
+          const { avg_lat, avg_lng, driver_count } = row as any;
+          if (
+            typeof avg_lat !== "number" ||
+            typeof avg_lng !== "number" ||
+            typeof driver_count !== "number"
+          ) continue;
+
+          synthesized.push(...expandTile(avg_lat, avg_lng, driver_count));
+        }
+
+        // Optionally blend in *my* current position so user sees themselves
+        if (position?.lat && position?.lng) {
+          synthesized.push({
+            lat: jitterCoord(position.lat),
+            lng: jitterCoord(position.lng),
+            ts: now,
+          });
+        }
+
+        // Merge with existing, drop expired, de-dup-ish, cap size
+        setPoints((prev) => {
+          const combined = [...prev, ...synthesized];
+          const fresh = combined.filter((p) => now - p.ts < EXPIRY_MS);
+
+          // Simple spatial de-dupe on ~5th-decimal grid
+          const uniq: Record<string, HeatPoint> = {};
+          for (const p of fresh) {
+            uniq[`${p.lat.toFixed(5)},${p.lng.toFixed(5)}`] = p;
+          }
+          return Object.values(uniq).slice(-MAX_POINTS);
+        });
+      } finally {
+        fetchingRef.current = false;
+      }
+    }
+
+    // Kick off polling
+    const poll = setInterval(fetchAggregated, FETCH_INTERVAL);
+    // Initial fetch for fast paint
+    fetchAggregated();
 
     // 🧹 Cleanup old points occasionally
     const cleanupInterval = setInterval(() => {
-      setPoints((prev) => prev.filter((p) => Date.now() - p.ts < EXPIRY_MS));
+      const now = Date.now();
+      setPoints((prev) => prev.filter((p) => now - p.ts < EXPIRY_MS));
     }, CLEANUP_INTERVAL);
 
     return () => {
-      clearInterval(sendInterval);
-      clearInterval(flushInterval);
+      isMounted = false;
+      clearInterval(poll);
       clearInterval(cleanupInterval);
-      channel?.unsubscribe();
-      channelRef.current = null;
     };
   }, [position?.lat, position?.lng]);
 
