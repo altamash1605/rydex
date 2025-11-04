@@ -1,5 +1,6 @@
 import { Capacitor, registerPlugin } from '@capacitor/core';
 import { recordLocation } from './locationStore';
+import { supabase } from '@/lib/supabaseClient';
 
 type BackgroundPlugin = {
   requestPermissions?: () => Promise<void>;
@@ -23,33 +24,34 @@ const BackgroundGeolocation = registerPlugin<BackgroundPlugin>('BackgroundGeoloc
 
 let watcherId: string | null = null;
 
+// 🧭 Reuse one Supabase channel globally
+let channel: ReturnType<typeof supabase.channel> | null = null;
+let lastSend = 0;
+let lastLog = 0;
+
 /**
  * Start background location tracking.
  * Requests permission if needed, then begins continuous tracking.
  */
 export async function startBackgroundTracking() {
-  if (watcherId) {
-    return;
-  }
-
-  if (!Capacitor.isNativePlatform()) {
-    return;
-  }
-
-  if (!Capacitor.isPluginAvailable('BackgroundGeolocation')) {
-    return;
-  }
+  if (watcherId) return;
+  if (!Capacitor.isNativePlatform()) return;
+  if (!Capacitor.isPluginAvailable('BackgroundGeolocation')) return;
 
   try {
-    // Request permissions only if available (prevents errors during web builds)
+    // Request permissions only if available
     if (BackgroundGeolocation?.requestPermissions) {
       await BackgroundGeolocation.requestPermissions();
     }
 
-    // Add watcher for location updates
+    // Initialize Supabase channel once
+    if (!channel) {
+      channel = supabase.channel('driver_heat');
+      channel.subscribe();
+    }
+
     watcherId = await BackgroundGeolocation.addWatcher(
       {
-        // Passing an ID is supported by the plugin even though the type definition omits it.
         id: 'rydex-tracker',
         backgroundMessage: 'Rydex is tracking your ride…',
         backgroundTitle: 'Rydex Tracking',
@@ -61,10 +63,7 @@ export async function startBackgroundTracking() {
           console.error('Background location error:', error);
           return;
         }
-
-        if (!location) {
-          return;
-        }
+        if (!location) return;
 
         const { latitude, longitude, accuracy } = location;
         if (
@@ -76,25 +75,35 @@ export async function startBackgroundTracking() {
           return;
         }
 
+        // Update local store
         await recordLocation([latitude, longitude], accuracy);
 
-        // also broadcast to Supabase in background
-        try {
-          const rounded = {
-            lat: Math.round(latitude * 100) / 100,
-            lng: Math.round(longitude * 100) / 100,
-          };
-          const { supabase } = await import('@/lib/supabaseClient');
-          await supabase
-            .channel('driver_heat')
-            .send({ type: 'broadcast', event: 'ping', payload: rounded });
-          console.log('📤 [BG] sent heat ping:', rounded);
-        } catch (err) {
-          console.warn('Supabase BG send error:', err);
+        // Debounce network broadcast
+        const now = Date.now();
+        if (now - lastSend >= 5000 && channel) {
+          lastSend = now;
+
+          try {
+            const rounded = {
+              lat: Math.round(latitude * 100) / 100,
+              lng: Math.round(longitude * 100) / 100,
+            };
+
+            await channel.send({
+              type: 'broadcast',
+              event: 'ping',
+              payload: rounded,
+            });
+
+            // Log only occasionally to avoid console spam
+            if (now - lastLog > 60000) {
+              console.log('📤 [BG] broadcast active (last ping):', rounded);
+              lastLog = now;
+            }
+          } catch (err) {
+            console.warn('Supabase BG send error:', err);
+          }
         }
-
-        console.log('Background location:', location);
-
       }
     );
   } catch (err) {
@@ -105,22 +114,20 @@ export async function startBackgroundTracking() {
 
 /**
  * Stop background location tracking.
- * Removes the active watcher if it exists.
  */
 export async function stopBackgroundTracking() {
-  if (!Capacitor.isNativePlatform()) {
-    return;
-  }
-
-  if (!Capacitor.isPluginAvailable('BackgroundGeolocation')) {
-    return;
-  }
+  if (!Capacitor.isNativePlatform()) return;
+  if (!Capacitor.isPluginAvailable('BackgroundGeolocation')) return;
 
   try {
     if (watcherId && BackgroundGeolocation?.removeWatcher) {
       await BackgroundGeolocation.removeWatcher({ id: watcherId });
       watcherId = null;
       console.log('Stopped background tracking');
+    }
+    if (channel) {
+      channel.unsubscribe();
+      channel = null;
     }
   } catch (err) {
     console.error('Failed to stop background tracking:', err);

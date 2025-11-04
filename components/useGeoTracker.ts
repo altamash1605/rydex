@@ -16,12 +16,8 @@ let Geolocation: any = null;
 let geolocationLoadPromise: Promise<void> | null = null;
 
 function ensureCapacitorGeolocation(): Promise<void> {
-  if (geolocationLoadPromise) {
-    return geolocationLoadPromise;
-  }
-  if (typeof window === 'undefined') {
-    return Promise.resolve();
-  }
+  if (geolocationLoadPromise) return geolocationLoadPromise;
+  if (typeof window === 'undefined') return Promise.resolve();
 
   geolocationLoadPromise = import('@capacitor/geolocation')
     .then((mod) => {
@@ -41,7 +37,9 @@ export function useGeoTracker() {
   const [path, setPath] = useState<LatLng[]>([]);
   const currentPos = useRef<LatLng | null>(null);
   const watchIdRef = useRef<any>(null);
+  const lastLog = useRef(0);
 
+  // 🧠 initialize local store
   useEffect(() => {
     let isMounted = true;
     let unsubscribe: (() => void) | undefined;
@@ -56,7 +54,8 @@ export function useGeoTracker() {
 
       unsubscribe = subscribeToLocationStore((state) => {
         if (!isMounted) return;
-        setPath(state.path);
+        // Avoid redundant renders if path unchanged
+        if (state.path.length !== path.length) setPath(state.path);
         currentPos.current = state.current;
       });
     })();
@@ -67,6 +66,7 @@ export function useGeoTracker() {
     };
   }, []);
 
+  // 🔄 handle visibility / reload from storage
   useEffect(() => {
     const handleVisibility = async () => {
       if (document.visibilityState === 'visible') {
@@ -91,6 +91,7 @@ export function useGeoTracker() {
     };
   }, []);
 
+  // 📡 start GPS watch + background tracking
   useEffect(() => {
     let isMounted = true;
 
@@ -100,31 +101,36 @@ export function useGeoTracker() {
         const handlePos = (latitude: number, longitude: number, accuracy: number) => {
           if (!isMounted) return;
           void recordLocation([latitude, longitude], accuracy);
+
+          // Light debug log every 30 s
+          const now = Date.now();
+          if (now - lastLog.current > 30000) {
+            console.log(`📍 Position update: ${latitude}, ${longitude} (±${accuracy} m)`);
+            lastLog.current = now;
+          }
         };
 
         if (Geolocation) {
-          // ✅ Native (Capacitor) GPS tracking with faster interval
+          // ✅ Native (Capacitor) GPS tracking — throttled to ~3 s
           watchIdRef.current = await Geolocation.watchPosition(
-            { enableHighAccuracy: true, timeout: 1000, maximumAge: 0 },
+            { enableHighAccuracy: true, timeout: 3000, maximumAge: 2000 },
             (pos: any, err: any) => {
               if (!isMounted) return;
               if (err) return console.warn('Capacitor GPS error:', err);
               const { latitude, longitude, accuracy } = pos.coords;
               handlePos(latitude, longitude, accuracy);
-              console.log(`📍 [Native] ${latitude}, ${longitude} (±${accuracy} m)`);
             }
           );
         } else if ('geolocation' in navigator) {
-          // 🌐 Web fallback (same high-frequency config)
+          // 🌐 Web fallback
           watchIdRef.current = navigator.geolocation.watchPosition(
             (pos) => {
               if (!isMounted) return;
               const { latitude, longitude, accuracy } = pos.coords;
               handlePos(latitude, longitude, accuracy);
-              console.log(`🌍 [Web] ${latitude}, ${longitude} (±${accuracy} m)`);
             },
             (err) => console.warn('Web GPS error:', err),
-            { enableHighAccuracy: true, timeout: 1000, maximumAge: 0 }
+            { enableHighAccuracy: true, timeout: 3000, maximumAge: 2000 }
           );
         } else {
           alert('Geolocation not supported on this device.');
@@ -135,7 +141,7 @@ export function useGeoTracker() {
     }
 
     void startWatch();
-    void startBackgroundTracking();
+    void startBackgroundTracking(); // still launches native background tracking
 
     return () => {
       isMounted = false;
