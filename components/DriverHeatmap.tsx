@@ -5,6 +5,8 @@ import { useRealtimeHeatmap } from '@/hooks/useRealtimeHeatmap';
 import { useGeoTracker } from './useGeoTracker';
 import { useEffect, useState, useMemo } from 'react';
 
+type HeatPoint = { lat: number; lng: number; w?: number };
+
 export default function DriverHeatmap() {
   const { currentPos } = useGeoTracker();
 
@@ -14,32 +16,39 @@ export default function DriverHeatmap() {
       ? { lat: currentPos.current[0], lng: currentPos.current[1] }
       : undefined;
 
+  // points now include optional weight `w` from the hook
   const { points } = useRealtimeHeatmap(position);
 
   // 🔥 fade out softly when no drivers visible
-  const [visiblePoints, setVisiblePoints] = useState(points);
+  const [visiblePoints, setVisiblePoints] = useState<HeatPoint[]>(points as HeatPoint[]);
 
   useEffect(() => {
     if (!points.length) {
       const timeout = setTimeout(() => setVisiblePoints([]), 1500);
       return () => clearTimeout(timeout);
     }
-    setVisiblePoints(points);
+    setVisiblePoints(points as HeatPoint[]);
   }, [points]);
 
   // 🧠 memoize props so HeatmapLayer re-draws only when data changes
   const heatmapProps = useMemo(
     () => ({
       points: visiblePoints,
-      latitudeExtractor: (p: { lat: number; lng: number }) => p.lat,
-      longitudeExtractor: (p: { lat: number; lng: number }) => p.lng,
-      intensityExtractor: () => 0.25, // softer intensity for more natural blending
+      latitudeExtractor: (p: HeatPoint) => p.lat,
+      longitudeExtractor: (p: HeatPoint) => p.lng,
+
+      // ✅ use backend weight (unique drivers per tile) without inflating dots
+      // clamp to [0.3, 3] so singles are visible but never overpower
+      intensityExtractor: (p: HeatPoint) => {
+        const w = p.w ?? 1;
+        return Math.max(0.3, Math.min(3, w));
+      },
 
       // 📏 radius/blur tuned for ±50 m visual spread at city zoom
-      radius: 45,  // larger glow area (approx ±50 m visually)
-      blur: 40,    // smooth fade-out at edges
-      max: 3.5,    // prevents over-saturation on overlaps
-      minOpacity: 0.15, // base ambient glow
+      radius: 45,   // px
+      blur: 40,     // px
+      max: 3.0,     // matches our clamp above
+      minOpacity: 0.15,
 
       // 🔥 single-color warm gradient
       gradient: {
