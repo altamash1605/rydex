@@ -1,6 +1,7 @@
+// utils/backgroundLocation.ts
 import { Capacitor, registerPlugin } from '@capacitor/core';
 import { recordLocation } from './locationStore';
-import { supabase } from '@/lib/supabaseClient';
+import { sendDriverPing } from '@/utils/edge';
 
 type BackgroundPlugin = {
   requestPermissions?: () => Promise<void>;
@@ -24,10 +25,46 @@ const BackgroundGeolocation = registerPlugin<BackgroundPlugin>('BackgroundGeoloc
 
 let watcherId: string | null = null;
 
-// 🧭 Reuse one Supabase channel globally
-let channel: ReturnType<typeof supabase.channel> | null = null;
+// ⏱️ Simple throttles
 let lastSend = 0;
 let lastLog = 0;
+
+// 🔑 Stable per-install driver ID (Capacitor Preferences if available, else localStorage)
+let _driverId: string | undefined;
+async function getDriverId() {
+  if (_driverId) return _driverId;
+
+  const KEY = 'rydex_driver_id';
+
+  // Try Capacitor Preferences (native)
+  try {
+    const { Preferences } = await import('@capacitor/preferences').catch(() => ({ Preferences: null as any }));
+    if (Preferences) {
+      const existing = await Preferences.get({ key: KEY });
+      if (existing?.value) {
+        _driverId = existing.value;
+        return _driverId;
+      }
+      const id = crypto.randomUUID();
+      await Preferences.set({ key: KEY, value: id });
+      _driverId = id;
+      return id;
+    }
+  } catch {
+    // fall through
+  }
+
+  // Web/local fallback
+  const existing = typeof window !== 'undefined' ? window.localStorage.getItem(KEY) : null;
+  if (existing) {
+    _driverId = existing;
+    return existing;
+  }
+  const id = crypto.randomUUID();
+  if (typeof window !== 'undefined') window.localStorage.setItem(KEY, id);
+  _driverId = id;
+  return id;
+}
 
 /**
  * Start background location tracking.
@@ -42,12 +79,6 @@ export async function startBackgroundTracking() {
     // Request permissions only if available
     if (BackgroundGeolocation?.requestPermissions) {
       await BackgroundGeolocation.requestPermissions();
-    }
-
-    // Initialize Supabase channel once
-    if (!channel) {
-      channel = supabase.channel('driver_heat');
-      channel.subscribe();
     }
 
     watcherId = await BackgroundGeolocation.addWatcher(
@@ -75,33 +106,34 @@ export async function startBackgroundTracking() {
           return;
         }
 
-        // Update local store
+        // Update local store immediately
         await recordLocation([latitude, longitude], accuracy);
 
-        // Debounce network broadcast
+        // Debounce network send (match your previous 5s cadence)
         const now = Date.now();
-        if (now - lastSend >= 5000 && channel) {
+        if (now - lastSend >= 5000) {
           lastSend = now;
-
           try {
-            const rounded = {
-              lat: Math.round(latitude * 100) / 100,
-              lng: Math.round(longitude * 100) / 100,
-            };
+            const driver_id = await getDriverId();
 
-            await channel.send({
-              type: 'broadcast',
-              event: 'ping',
-              payload: rounded,
+            await sendDriverPing({
+              driver_id,
+              lat: latitude,
+              lng: longitude,
+              accuracy: typeof accuracy === 'number' ? accuracy : undefined,
             });
 
-            // Log only occasionally to avoid console spam
+            // Occasional log to keep console tidy
             if (now - lastLog > 60000) {
-              console.log('📤 [BG] broadcast active (last ping):', rounded);
+              console.log('📤 [BG] edge ping sent:', {
+                lat: Number(latitude.toFixed(5)),
+                lng: Number(longitude.toFixed(5)),
+                accuracy,
+              });
               lastLog = now;
             }
           } catch (err) {
-            console.warn('Supabase BG send error:', err);
+            console.warn('sendDriverPing error:', err);
           }
         }
       }
@@ -124,10 +156,6 @@ export async function stopBackgroundTracking() {
       await BackgroundGeolocation.removeWatcher({ id: watcherId });
       watcherId = null;
       console.log('Stopped background tracking');
-    }
-    if (channel) {
-      channel.unsubscribe();
-      channel = null;
     }
   } catch (err) {
     console.error('Failed to stop background tracking:', err);
