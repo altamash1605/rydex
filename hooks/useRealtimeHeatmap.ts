@@ -36,6 +36,18 @@ const FN_READ = `https://${PROJECT_REF}.functions.supabase.co/get_heat_tiles`;
 const FETCH_AGG_MS = 10_000;     // poll analytics every 10s
 const LOOKBACK_MIN = 20;         // read last 20 minutes of analytics rows
 
+// --- WEB WRITER HELPERS (adds browser pings every ~5s; native continues to use BG plugin)
+let lastWebSend = 0;
+function getDriverIdForWeb(): string {
+  const KEY = "rydex_driver_id";
+  if (typeof window === "undefined") return crypto.randomUUID();
+  const existing = window.localStorage.getItem(KEY);
+  if (existing) return existing;
+  const id = crypto.randomUUID();
+  window.localStorage.setItem(KEY, id);
+  return id;
+}
+
 export function useRealtimeHeatmap(position?: { lat: number; lng: number }) {
   const [points, setPoints] = useState<HeatPoint[]>([]);
   const fetchingNear = useRef(false);
@@ -72,6 +84,27 @@ export function useRealtimeHeatmap(position?: { lat: number; lng: number }) {
         // Blend user's current position so it feels live
         if (position?.lat && position?.lng) {
           fresh.push({ lat: jitterCoord(position.lat), lng: jitterCoord(position.lng), ts: now });
+        }
+
+        // --- WEB WRITER: send a ping from the browser every ~5s (native already writes on its own)
+        try {
+          const { Capacitor } = await import("@capacitor/core").catch(() => ({ Capacitor: null as any }));
+          const isNative = !!Capacitor?.isNativePlatform?.();
+          if (!isNative && position?.lat && position?.lng) {
+            if (now - lastWebSend > 5000) {
+              lastWebSend = now;
+              const { sendDriverPing } = await import("@/utils/edge");
+              await sendDriverPing({
+                driver_id: getDriverIdForWeb(),
+                lat: position.lat,
+                lng: position.lng,
+                accuracy: undefined,
+              });
+              // console.debug("web writer sent");
+            }
+          }
+        } catch {
+          // ignore web send errors
         }
 
         // Merge, drop expired, sparse-dedupe, cap
