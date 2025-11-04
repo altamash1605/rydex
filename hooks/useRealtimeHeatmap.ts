@@ -67,10 +67,10 @@ export function useRealtimeHeatmap(position?: { lat: number; lng: number }) {
         const now = Date.now();
         const myId = getDriverIdForWeb();
 
-        // === BUILD A FRESH FRAME (NO ACCUMULATION) ===
+        // --- temporary containers for deduplication ---
+        const seenDrivers = new Set<string>();
         const byCell: Record<string, HeatPoint> = {};
 
-        // backend tiles → one point per grid cell, weighted by unique drivers
         // backend tiles → one point per grid cell, weighted by unique drivers
         for (const t of data.tiles ?? []) {
           if (
@@ -80,17 +80,17 @@ export function useRealtimeHeatmap(position?: { lat: number; lng: number }) {
           )
             continue;
 
-          // ✅ NEW: skip if backend echoed our own driver_id OR same location cell
+          const driverId = (t as any).driver_id ?? `anon_${Math.random()}`;
           const key = gridKey(t.lat, t.lng);
           const myCell = position ? gridKey(position.lat, position.lng) : null;
 
-          if ((t as any).driver_id === myId || (myCell && key === myCell)) {
-            continue;
-          }
+          // 🚫 skip my own, same-cell, and duplicate drivers
+          if (driverId === myId || (myCell && key === myCell)) continue;
+          if (seenDrivers.has(driverId)) continue; // ✅ one per driver per cell
+          seenDrivers.add(driverId);
 
           byCell[key] = tileToPoint(t.lat, t.lng, t.drivers);
         }
-
 
         // 🧭 do NOT add our own position locally (avoids self-hotspot)
         const SHOW_SELF = false;
@@ -158,6 +158,7 @@ export function useRealtimeHeatmap(position?: { lat: number; lng: number }) {
       }
     }
 
+    // Kickoff + polling loops
     fetchNearLive();
     const nearTimer = setInterval(fetchNearLive, FETCH_NEAR_MS);
     const aggTimer = setInterval(fetchAnalytics, FETCH_AGG_MS);
