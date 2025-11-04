@@ -16,7 +16,7 @@ export default function DriverHeatmap() {
 
   const { points } = useRealtimeHeatmap(position);
 
-  // 🔥 local fade-out when few points remain
+  // 🔥 fade out softly when no drivers visible
   const [visiblePoints, setVisiblePoints] = useState(points);
 
   useEffect(() => {
@@ -27,21 +27,26 @@ export default function DriverHeatmap() {
     setVisiblePoints(points);
   }, [points]);
 
-  // 🧠 memoize props so HeatmapLayer only re-draws when data truly changes
+  // 🧠 memoize props so HeatmapLayer re-draws only when data changes
   const heatmapProps = useMemo(
     () => ({
       points: visiblePoints,
       latitudeExtractor: (p: { lat: number; lng: number }) => p.lat,
       longitudeExtractor: (p: { lat: number; lng: number }) => p.lng,
-      intensityExtractor: () => 0.35,   // slightly softer per driver
-      radius: 25,                       // smaller radius = less GPU load
-      blur: 25,                         // smoother + faster blending
-      max: 4,
-      minOpacity: 0.12,
+      intensityExtractor: () => 0.25, // softer intensity for more natural blending
+
+      // 📏 radius/blur tuned for ±50 m visual spread at city zoom
+      radius: 45,  // larger glow area (approx ±50 m visually)
+      blur: 40,    // smooth fade-out at edges
+      max: 3.5,    // prevents over-saturation on overlaps
+      minOpacity: 0.15, // base ambient glow
+
+      // 🔥 single-color warm gradient
       gradient: {
         0.0: 'rgba(255, 80, 0, 0)',
-        0.5: 'rgba(255, 80, 0, 0.4)',
-        1.0: 'rgba(255, 80, 0, 1.0)',
+        0.3: 'rgba(255, 100, 0, 0.3)',
+        0.6: 'rgba(255, 100, 0, 0.55)',
+        1.0: 'rgba(255, 60, 0, 0.9)',
       },
     }),
     [visiblePoints]

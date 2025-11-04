@@ -3,9 +3,10 @@ import { supabase } from "@/lib/supabaseClient";
 
 type HeatPoint = { lat: number; lng: number; ts: number };
 
-// Round coords for privacy (~1 km precision)
-function roundCoord(value: number) {
-  return Math.round(value * 100) / 100;
+// Add a very small random jitter (~±0.0005° ≈ ±50 m)
+function jitterCoord(value: number) {
+  const jitter = (Math.random() - 0.5) * 0.001; // ±0.0005°
+  return value + jitter;
 }
 
 // Expiry & batching settings
@@ -44,13 +45,14 @@ export function useRealtimeHeatmap(position?: { lat: number; lng: number }) {
       if (now - lastSendRef.current < 5000) return; // 5 s debounce
       lastSendRef.current = now;
 
-      const rounded = {
-        lat: roundCoord(position.lat),
-        lng: roundCoord(position.lng),
+      // use exact location with ±50 m jitter
+      const adjusted = {
+        lat: jitterCoord(position.lat),
+        lng: jitterCoord(position.lng),
       };
 
       channel
-        ?.send({ type: "broadcast", event: "ping", payload: rounded })
+        ?.send({ type: "broadcast", event: "ping", payload: adjusted })
         .catch((err) => console.warn("Supabase send error:", err));
     }, 1000);
 
@@ -66,7 +68,7 @@ export function useRealtimeHeatmap(position?: { lat: number; lng: number }) {
         const now = Date.now();
         const unique: Record<string, HeatPoint> = {};
         for (const p of combined) {
-          if (now - p.ts < EXPIRY_MS) unique[`${p.lat},${p.lng}`] = p;
+          if (now - p.ts < EXPIRY_MS) unique[`${p.lat.toFixed(5)},${p.lng.toFixed(5)}`] = p;
         }
         return Object.values(unique).slice(-100);
       });
