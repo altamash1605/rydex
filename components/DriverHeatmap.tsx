@@ -3,6 +3,7 @@
 import { HeatmapLayer } from 'react-leaflet-heatmap-layer-v3';
 import { useRealtimeHeatmap } from '@/hooks/useRealtimeHeatmap';
 import { useGeoTracker } from './useGeoTracker';
+import { useEffect, useState } from 'react';
 
 export default function DriverHeatmap() {
   const { currentPos } = useGeoTracker();
@@ -15,25 +16,35 @@ export default function DriverHeatmap() {
 
   const { points } = useRealtimeHeatmap(position);
 
-  if (!points.length) return null;
+  // 🔥 local fading effect: gradually reduce intensity when few points remain
+  const [visiblePoints, setVisiblePoints] = useState(points);
+
+  useEffect(() => {
+    if (!points.length) {
+      // fade out smoothly when no points
+      const timeout = setTimeout(() => setVisiblePoints([]), 2000);
+      return () => clearTimeout(timeout);
+    }
+    setVisiblePoints(points);
+  }, [points]);
+
+  if (!visiblePoints.length) return null;
 
   return (
     <HeatmapLayer
-      points={points}
+      points={visiblePoints}
       latitudeExtractor={(p: { lat: number; lng: number }) => p.lat}
       longitudeExtractor={(p: { lat: number; lng: number }) => p.lng}
-      // 🌤️ Softer single-driver glow
-      intensityExtractor={() => 0.35}  // lower = less “hot” (0.2–0.5 recommended)
-      radius={25}                      // wider spread of the glow
-      blur={30}                        // smooth feathered edges
-      max={3}                          // prevents early saturation (more control)
-      minOpacity={0.2}                 // subtle baseline glow even when faint
+      intensityExtractor={() => 0.4}   // base intensity per driver
+      radius={30}                      // determines spread (increase for smoother blend)
+      blur={35}                        // feathered edges
+      max={4}                          // higher = slower saturation when drivers overlap
+      minOpacity={0.15}                // softer base when only 1 driver
+      // 🟠 single-color gradient: one color that strengthens with overlap
       gradient={{
-        0.0: 'rgba(0, 0, 255, 0)',     // transparent blue at outer edges
-        0.4: 'rgba(0, 255, 255, 0.4)', // soft cyan
-        0.6: 'rgba(255, 255, 0, 0.6)', // warm yellow
-        0.8: 'rgba(255, 165, 0, 0.7)', // orange core
-        1.0: 'rgba(255, 69, 0, 0.8)',  // soft red center
+        0.0: 'rgba(255, 80, 0, 0)',   // fully transparent
+        0.5: 'rgba(255, 80, 0, 0.4)', // soft orange midtone
+        1.0: 'rgba(255, 80, 0, 1.0)'  // strong orange-red core
       }}
     />
   );
