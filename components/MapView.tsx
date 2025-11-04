@@ -12,6 +12,8 @@ import { useGeoTracker } from './useGeoTracker';
 import { useLeafletLayers } from './useLeafletLayers';
 import type { Map as LeafletMap } from 'leaflet';
 import L from 'leaflet';
+import DriverHeatmap from './DriverHeatmap';
+
 
 const MapContainer = dynamic(() => import('react-leaflet').then(m => m.MapContainer), { ssr: false });
 const TileLayer = dynamic(() => import('react-leaflet').then(m => m.TileLayer), { ssr: false });
@@ -551,6 +553,7 @@ export default function MapView() {
           zoomSnap={0}
           zoomDelta={0.01}
         >
+          <DriverHeatmap />
           <TileLayer
             url="https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png"
             attribution='&copy; <a href="https://carto.com/attributions">CARTO</a> &copy; OpenStreetMap contributors'
