@@ -21,15 +21,12 @@ function tileToPoint(avgLat: number, avgLng: number, drivers?: number): HeatPoin
 
 // --- Tunables
 const MAX_POINTS = 400;
-
-// Near-live (backend already dedupes by unique drivers per tile)
-const NEAR_LOOKBACK_S = 60;      // give ourselves a bigger window
-const FETCH_NEAR_MS = 3_000;     // poll near-live every 3s
+const NEAR_LOOKBACK_S = 60;
+const FETCH_NEAR_MS = 3_000;
 const PROJECT_REF = "vuymzcnkhzhjuykrfavy";
 const FN_READ = `https://${PROJECT_REF}.functions.supabase.co/get_heat_tiles`;
 
-// Analytics (optional)
-const FETCH_AGG_MS = 10_000;     // poll analytics every 10s
+const FETCH_AGG_MS = 10_000;
 const LOOKBACK_MIN = 20;
 
 let lastWebSend = 0;
@@ -63,30 +60,46 @@ export function useRealtimeHeatmap(position?: { lat: number; lng: number }) {
         if (!res.ok) return;
         const data = (await res.json()) as {
           ok: boolean;
-          tiles: { lat: number; lng: number; drivers: number }[];
+          tiles: { lat: number; lng: number; drivers: number; driver_id?: string }[];
         };
         if (!mounted || !data?.ok) return;
 
         const now = Date.now();
+        const myId = getDriverIdForWeb();
 
         // === BUILD A FRESH FRAME (NO ACCUMULATION) ===
         const byCell: Record<string, HeatPoint> = {};
 
         // backend tiles → one point per grid cell, weighted by unique drivers
+        // backend tiles → one point per grid cell, weighted by unique drivers
         for (const t of data.tiles ?? []) {
-          if (typeof t.lat !== "number" || typeof t.lng !== "number" || typeof t.drivers !== "number") continue;
+          if (
+            typeof t.lat !== "number" ||
+            typeof t.lng !== "number" ||
+            typeof t.drivers !== "number"
+          )
+            continue;
+
+          // ✅ NEW: skip if backend echoed our own driver_id OR same location cell
           const key = gridKey(t.lat, t.lng);
-          // newest wins if duplicate cell appears
+          const myCell = position ? gridKey(position.lat, position.lng) : null;
+
+          if ((t as any).driver_id === myId || (myCell && key === myCell)) {
+            continue;
+          }
+
           byCell[key] = tileToPoint(t.lat, t.lng, t.drivers);
         }
 
-        // my own current position → exactly one cell, light weight (no jitter)
-        if (position?.lat && position?.lng) {
+
+        // 🧭 do NOT add our own position locally (avoids self-hotspot)
+        const SHOW_SELF = false;
+        if (SHOW_SELF && position?.lat && position?.lng) {
           const key = gridKey(position.lat, position.lng);
           byCell[key] = { lat: position.lat, lng: position.lng, ts: now, w: 0.6 };
         }
 
-        // (optional) web writer: send a ping from browser every ~5s (native writes itself)
+        // (optional) send a web ping (still keeps backend data accurate)
         try {
           const { Capacitor } = await import("@capacitor/core").catch(() => ({ Capacitor: null as any }));
           const isNative = !!Capacitor?.isNativePlatform?.();
@@ -95,7 +108,7 @@ export function useRealtimeHeatmap(position?: { lat: number; lng: number }) {
               lastWebSend = now;
               const { sendDriverPing } = await import("@/utils/edge");
               await sendDriverPing({
-                driver_id: getDriverIdForWeb(),
+                driver_id: myId,
                 lat: position.lat,
                 lng: position.lng,
                 accuracy: undefined,
@@ -103,10 +116,9 @@ export function useRealtimeHeatmap(position?: { lat: number; lng: number }) {
             }
           }
         } catch {
-          // ignore
+          // ignore errors
         }
 
-        // commit this frame: ONE point per cell
         const frame = Object.values(byCell).slice(-MAX_POINTS);
         setPoints(frame);
       } finally {
@@ -128,11 +140,15 @@ export function useRealtimeHeatmap(position?: { lat: number; lng: number }) {
 
         if (error) return;
 
-        // analytics frame (also no accumulation)
         const byCell: Record<string, HeatPoint> = {};
         for (const row of data ?? []) {
           const { avg_lat, avg_lng, driver_count } = row as any;
-          if (typeof avg_lat !== "number" || typeof avg_lng !== "number" || typeof driver_count !== "number") continue;
+          if (
+            typeof avg_lat !== "number" ||
+            typeof avg_lng !== "number" ||
+            typeof driver_count !== "number"
+          )
+            continue;
           const key = gridKey(avg_lat, avg_lng);
           byCell[key] = tileToPoint(avg_lat, avg_lng, driver_count);
         }
@@ -142,11 +158,8 @@ export function useRealtimeHeatmap(position?: { lat: number; lng: number }) {
       }
     }
 
-    // Kickoff + polling loops
     fetchNearLive();
     const nearTimer = setInterval(fetchNearLive, FETCH_NEAR_MS);
-
-    // (optional) analytics in background; safe to leave as-is
     const aggTimer = setInterval(fetchAnalytics, FETCH_AGG_MS);
 
     return () => {
@@ -156,7 +169,6 @@ export function useRealtimeHeatmap(position?: { lat: number; lng: number }) {
     };
   }, [position?.lat, position?.lng]);
 
-  // pass weights through for the heat layer
   const heatPoints = points.map(p => ({ lat: p.lat, lng: p.lng, w: p.w ?? 1 }));
 
   return { points: heatPoints };
