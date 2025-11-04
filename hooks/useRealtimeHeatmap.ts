@@ -27,7 +27,7 @@ const CLEANUP_INTERVAL = 5_000;  // prune every 5s
 const MAX_POINTS = 400;          // cap total points rendered
 
 // Near-live (last 120s of pings via Edge Function)
-const NEAR_LOOKBACK_S = 120;
+const NEAR_LOOKBACK_S = 20;
 const FETCH_NEAR_MS = 3_000;     // poll near-live every 3s
 const PROJECT_REF = "vuymzcnkhzhjuykrfavy";
 const FN_READ = `https://${PROJECT_REF}.functions.supabase.co/get_heat_tiles`;
