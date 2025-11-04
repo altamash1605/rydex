@@ -29,41 +29,27 @@ let watcherId: string | null = null;
 let lastSend = 0;
 let lastLog = 0;
 
-// 🔑 Stable per-install driver ID (Capacitor Preferences if available, else localStorage)
+// 🔑 Stable per-install driver ID via localStorage (works in web & Capacitor WebView)
 let _driverId: string | undefined;
 async function getDriverId() {
   if (_driverId) return _driverId;
-
   const KEY = 'rydex_driver_id';
-
-  // Try Capacitor Preferences (native)
   try {
-    const { Preferences } = await import('@capacitor/preferences').catch(() => ({ Preferences: null as any }));
-    if (Preferences) {
-      const existing = await Preferences.get({ key: KEY });
-      if (existing?.value) {
-        _driverId = existing.value;
-        return _driverId;
-      }
-      const id = crypto.randomUUID();
-      await Preferences.set({ key: KEY, value: id });
-      _driverId = id;
-      return id;
+    const existing = typeof window !== 'undefined' ? window.localStorage.getItem(KEY) : null;
+    if (existing) {
+      _driverId = existing;
+      return existing;
     }
+    const id = crypto.randomUUID();
+    if (typeof window !== 'undefined') window.localStorage.setItem(KEY, id);
+    _driverId = id;
+    return id;
   } catch {
-    // fall through
+    // Fallback if localStorage is unavailable
+    const id = crypto.randomUUID();
+    _driverId = id;
+    return id;
   }
-
-  // Web/local fallback
-  const existing = typeof window !== 'undefined' ? window.localStorage.getItem(KEY) : null;
-  if (existing) {
-    _driverId = existing;
-    return existing;
-  }
-  const id = crypto.randomUUID();
-  if (typeof window !== 'undefined') window.localStorage.setItem(KEY, id);
-  _driverId = id;
-  return id;
 }
 
 /**
@@ -109,7 +95,7 @@ export async function startBackgroundTracking() {
         // Update local store immediately
         await recordLocation([latitude, longitude], accuracy);
 
-        // Debounce network send (match your previous 5s cadence)
+        // Debounce network send (5s cadence)
         const now = Date.now();
         if (now - lastSend >= 5000) {
           lastSend = now;
