@@ -27,7 +27,7 @@ const CLEANUP_INTERVAL = 5_000;  // prune every 5s
 const MAX_POINTS = 400;          // cap total points rendered
 
 // Near-live (last 120s of pings via Edge Function)
-const NEAR_LOOKBACK_S = 120;
+const NEAR_LOOKBACK_S = 20;
 const FETCH_NEAR_MS = 3_000;     // poll near-live every 3s
 const PROJECT_REF = "vuymzcnkhzhjuykrfavy";
 const FN_READ = `https://${PROJECT_REF}.functions.supabase.co/get_heat_tiles`;
@@ -58,6 +58,7 @@ export function useRealtimeHeatmap(position?: { lat: number; lng: number }) {
         });
         if (!res.ok) return; // soft fail
         const data = (await res.json()) as { ok: boolean; tiles: { lat: number; lng: number; drivers: number }[] };
+        console.debug("near-live tiles:", data?.tiles?.length ?? 0);
         if (!mounted || !data?.ok) return;
 
         const now = Date.now();
@@ -77,6 +78,8 @@ export function useRealtimeHeatmap(position?: { lat: number; lng: number }) {
         setPoints(prev => {
           const combined = [...prev, ...fresh];
           const recent = combined.filter(p => now - p.ts < EXPIRY_MS);
+          // debug
+          console.debug("render points:", (prev.length + fresh.length));
 
           const uniq: Record<string, HeatPoint> = {};
           for (const p of recent) {

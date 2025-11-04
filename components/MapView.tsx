@@ -13,12 +13,14 @@ import { useLeafletLayers } from './useLeafletLayers';
 import type { Map as LeafletMap } from 'leaflet';
 import L from 'leaflet';
 import DriverHeatmap from './DriverHeatmap';
-
+import { useRealtimeHeatmap } from '../hooks/useRealtimeHeatmap'; // ← NEW
 
 const MapContainer = dynamic(() => import('react-leaflet').then(m => m.MapContainer), { ssr: false });
-const TileLayer = dynamic(() => import('react-leaflet').then(m => m.TileLayer), { ssr: false });
-const Marker = dynamic(() => import('react-leaflet').then(m => m.Marker), { ssr: false });
-const Polyline = dynamic(() => import('react-leaflet').then(m => m.Polyline), { ssr: false });
+const TileLayer   = dynamic(() => import('react-leaflet').then(m => m.TileLayer),   { ssr: false });
+const Marker      = dynamic(() => import('react-leaflet').then(m => m.Marker),      { ssr: false });
+const Polyline    = dynamic(() => import('react-leaflet').then(m => m.Polyline),    { ssr: false });
+// 🔴 Debug overlay markers for backend tiles
+const CircleMarker = dynamic(() => import('react-leaflet').then(m => m.CircleMarker), { ssr: false });
 
 export default function MapView() {
   const mapRef = useRef<LeafletMap | null>(null);
@@ -70,9 +72,7 @@ export default function MapView() {
 
   const animateMarker = useCallback(
     (target: [number, number]) => {
-      if (!target) {
-        return;
-      }
+      if (!target) return;
 
       const start = markerPositionRef.current;
       if (!start) {
@@ -81,9 +81,7 @@ export default function MapView() {
         return;
       }
 
-      if (start[0] === target[0] && start[1] === target[1]) {
-        return;
-      }
+      if (start[0] === target[0] && start[1] === target[1]) return;
 
       if (markerAnimationFrame.current != null) {
         window.cancelAnimationFrame(markerAnimationFrame.current);
@@ -118,9 +116,7 @@ export default function MapView() {
 
   useEffect(() => {
     const target = currentPos.current;
-    if (!target) {
-      return;
-    }
+    if (!target) return;
     animateMarker(target);
   }, [path, currentPos, animateMarker]);
 
@@ -171,14 +167,11 @@ export default function MapView() {
   };
 
   useEffect(() => {
-    if (!mapReady) {
-      return;
-    }
+    if (!mapReady) return;
     const map = mapRef.current;
     const coords = currentPos.current;
-    if (!map || !coords || hasAutoCentered.current) {
-      return;
-    }
+    if (!map || !coords || hasAutoCentered.current) return;
+
     hasAutoCentered.current = true;
     const timeout = window.setTimeout(() => {
       markProgrammaticMove();
@@ -191,15 +184,12 @@ export default function MapView() {
     };
   }, [path, mapReady]);
 
+  // --- Smooth double-tap-drag zoom block (unchanged) ---
   useEffect(() => {
-    if (!mapReady) {
-      return;
-    }
+    if (!mapReady) return;
 
     const map = mapRef.current;
-    if (!map) {
-      return;
-    }
+    if (!map) return;
 
     map.doubleClickZoom.disable();
     const previousZoomSnap = map.options.zoomSnap;
@@ -216,7 +206,6 @@ export default function MapView() {
       return;
     }
 
-    // NEW: prevent page scroll/zoom fighting this gesture
     const prevTouchAction = container.style.touchAction;
     container.style.touchAction = 'none';
 
@@ -236,16 +225,13 @@ export default function MapView() {
     const minZoom = map.getMinZoom();
     const maxZoom = map.getMaxZoom();
 
-    // keep preview visible & commit in small steps
     const PREVIEW_MIN = 0.6;
     const PREVIEW_MAX = 2.0;
     const COMMIT_STEP = 0.20;
 
-    // accumulators for smooth zoom
     let zoomAccumulator = 0;
     let lastYDuringGesture = 0;
 
-    // NEW: double-tap detection window & spatial tolerance + single-finger guard
     const TAP_MIN_MS = 50;
     const TAP_MAX_MS = 350;
     const TAP_MOVE_TOL = 18; // px
@@ -303,9 +289,7 @@ export default function MapView() {
     };
 
     const endGesture = (commit: boolean) => {
-      if (!gestureActive) {
-        return;
-      }
+      if (!gestureActive) return;
 
       gestureActive = false;
 
@@ -313,7 +297,7 @@ export default function MapView() {
         try {
           container.releasePointerCapture(pointerId);
         } catch {
-          // ignore capture release failures
+          // ignore
         }
       }
       pointerId = null;
@@ -324,7 +308,6 @@ export default function MapView() {
       draggingDisabledForGesture = false;
 
       if (!commit) {
-        // Cancel path
         animateBackToIdentity(false);
         anchorPoint = null;
         anchorLatLng = null;
@@ -335,12 +318,7 @@ export default function MapView() {
         return;
       }
 
-      // Commit path
-      const targetZoom = Math.max(
-        minZoom,
-        Math.min(maxZoom, startZoom + zoomAccumulator),
-      );
-
+      const targetZoom = Math.max(minZoom, Math.min(maxZoom, startZoom + zoomAccumulator));
       animateBackToIdentity(true);
 
       const focusLatLng = anchorLatLng;
@@ -352,7 +330,6 @@ export default function MapView() {
         }
       });
 
-      // Reset gesture state
       anchorPoint = null;
       anchorLatLng = null;
       lastScale = 1;
@@ -363,22 +340,17 @@ export default function MapView() {
 
     const handlePointerDown = (event: PointerEvent) => {
       if (event.pointerType === 'touch') activeTouchCount++;
-      if (event.pointerType !== 'touch') {
-        return; // do NOT modify lastTapTime for mouse/stylus
-      }
+      if (event.pointerType !== 'touch') return;
 
       const now = performance.now();
       const rect = container.getBoundingClientRect();
       const thisTapPoint = L.point(event.clientX - rect.left, event.clientY - rect.top);
 
       const delta = now - lastTapTime;
-      const inTimeWindow = delta >= TAP_MIN_MS && delta <= TAP_MAX_MS;
-      const inSpatialWindow = lastTapPoint
-        ? lastTapPoint.distanceTo(thisTapPoint) <= TAP_MOVE_TOL
-        : false;
+      const inTimeWindow = delta >= 50 && delta <= 350;
+      const inSpatialWindow = lastTapPoint ? lastTapPoint.distanceTo(thisTapPoint) <= 18 : false;
 
       if (activeTouchCount === 1 && inTimeWindow && inSpatialWindow) {
-        // Start the special gesture
         pointerId = event.pointerId;
         anchorPoint = thisTapPoint;
         anchorLatLng = map.containerPointToLatLng(anchorPoint);
@@ -388,10 +360,8 @@ export default function MapView() {
         movedDuringGesture = false;
         gestureActive = true;
 
-        // ensure preview scales around the exact touch pixel
         mapPane.style.transformOrigin = `${anchorPoint.x}px ${anchorPoint.y}px`;
 
-        // init smooth-zoom accumulators
         lastYDuringGesture = event.clientY;
         zoomAccumulator = 0;
 
@@ -405,12 +375,9 @@ export default function MapView() {
         if (container.setPointerCapture) {
           try {
             container.setPointerCapture(event.pointerId);
-          } catch {
-            // ignore capture errors
-          }
+          } catch { /* ignore */ }
         }
 
-        // reset the double-tap clock so a third tap doesn’t chain
         lastTapTime = 0;
         lastTapPoint = null;
 
@@ -419,7 +386,6 @@ export default function MapView() {
         return;
       }
 
-      // Otherwise: record this as potential first tap
       lastTapTime = now;
       lastTapPoint = thisTapPoint;
     };
@@ -427,28 +393,24 @@ export default function MapView() {
     const handlePointerMove = (event: PointerEvent) => {
       if (!gestureActive || event.pointerId !== pointerId) return;
 
-      // down = positive (zoom in), up = negative (zoom out)
       const dy = event.clientY - lastYDuringGesture;
       lastYDuringGesture = event.clientY;
 
-      // convert to fractional zoom levels
-      const dz = dy / sensitivity; // 240px ≈ 1 zoom level
+      const dz = dy / 200; // 200px ≈ 1 zoom
       zoomAccumulator += dz;
 
       if (!movedDuringGesture && Math.abs(zoomAccumulator) > 0.01) {
         movedDuringGesture = true;
       }
 
-      // visual preview: keep small so map never vanishes
       const previewScale = Math.pow(2, zoomAccumulator);
-      const safePreview = Math.max(PREVIEW_MIN, Math.min(PREVIEW_MAX, previewScale));
+      const safePreview = Math.max(0.6, Math.min(2.0, previewScale));
       lastScale = safePreview;
       applyVisualScale(safePreview);
 
-      // continuously commit small real zoom steps, pinned to the touch anchor
-      while (Math.abs(zoomAccumulator) >= COMMIT_STEP) {
-        const step = Math.sign(zoomAccumulator) * COMMIT_STEP;
-        const nextZoom = Math.max(minZoom, Math.min(maxZoom, startZoom + step));
+      while (Math.abs(zoomAccumulator) >= 0.20) {
+        const step = Math.sign(zoomAccumulator) * 0.20;
+        const nextZoom = Math.max(map.getMinZoom(), Math.min(map.getMaxZoom(), startZoom + step));
 
         if (anchorLatLng) {
           map.setZoomAround(anchorLatLng, nextZoom, { animate: false });
@@ -456,12 +418,11 @@ export default function MapView() {
           map.setZoom(nextZoom, { animate: false });
         }
 
-        // reset baseline so preview stays tiny and stable
         startZoom = map.getZoom();
         zoomAccumulator -= step;
 
         const rescaled = Math.pow(2, zoomAccumulator);
-        applyVisualScale(Math.max(PREVIEW_MIN, Math.min(PREVIEW_MAX, rescaled)));
+        applyVisualScale(Math.max(0.6, Math.min(2.0, rescaled)));
       }
 
       event.preventDefault();
@@ -469,9 +430,7 @@ export default function MapView() {
     };
 
     const finishGesture = (event: PointerEvent) => {
-      if (!gestureActive || (pointerId != null && event.pointerId !== pointerId)) {
-        return;
-      }
+      if (!gestureActive || (pointerId != null && event.pointerId !== pointerId)) return;
 
       if (movedDuringGesture) {
         endGesture(true);
@@ -492,9 +451,7 @@ export default function MapView() {
 
     const handlePointerCancel = (event: PointerEvent) => {
       if (event.pointerType === 'touch') activeTouchCount = Math.max(0, activeTouchCount - 1);
-      if (!gestureActive || (pointerId != null && event.pointerId !== pointerId)) {
-        return;
-      }
+      if (!gestureActive || (pointerId != null && event.pointerId !== pointerId)) return;
       endGesture(false);
       lastTapTime = 0;
     };
@@ -506,10 +463,9 @@ export default function MapView() {
     container.addEventListener('pointerleave', handlePointerCancel);
 
     return () => {
-      // restore touch-action
       container.style.touchAction = prevTouchAction;
 
-      cancelAnimation();
+      if (rafId != null) window.cancelAnimationFrame(rafId);
       container.removeEventListener('pointerdown', handlePointerDown);
       container.removeEventListener('pointermove', handlePointerMove);
       container.removeEventListener('pointerup', handlePointerUp);
@@ -539,6 +495,11 @@ export default function MapView() {
   const lng = currentPos.current?.[1] ?? 0;
   const markerPoint = markerPosition ?? (currentPos.current ? [lat, lng] : null);
 
+  // 🔴 NEW: pull near-live + analytics tiles and render debug dots
+  const { points } = useRealtimeHeatmap(
+    currentPos.current ? { lat, lng } : undefined
+  );
+
   return (
     <div className="relative h-full w-full overflow-hidden bg-[#111827]">
       {/* Map layer */}
@@ -553,12 +514,27 @@ export default function MapView() {
           zoomSnap={0}
           zoomDelta={0.01}
         >
+          {/* Existing heat layer */}
           <DriverHeatmap />
+
+          {/* Base tiles */}
           <TileLayer
             url="https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png"
             attribution='&copy; <a href="https://carto.com/attributions">CARTO</a> &copy; OpenStreetMap contributors'
           />
-          {markerPoint && <Marker position={markerPoint} icon={markerIcon}></Marker>}
+
+          {/* 🔴 TEMP DEBUG: draw each heat point as a visible red dot */}
+          {points.map((p, i) => (
+            <CircleMarker
+              key={`heat-${i}`}
+              center={[p.lat, p.lng]}
+              radius={6}
+              pathOptions={{ color: '#ff3b30', weight: 2, fillOpacity: 0.85 }}
+            />
+          ))}
+
+          {/* User marker & path */}
+          {markerPoint && <Marker position={markerPoint} icon={markerIcon} />}
           {showPath && path.length > 1 && <Polyline positions={path} color="#fb923c" weight={4} />}
         </MapContainer>
       </div>
@@ -579,7 +555,7 @@ export default function MapView() {
         </div>
       </div>
 
-      {/* Bottom Button */}
+      {/* Bottom Buttons */}
       <div
         className="rydex-overlay rydex-overlay-bottom pointer-events-none absolute inset-x-0 bottom-0 flex justify-center px-4 sm:px-6"
         style={{ paddingBottom: 'calc(max(env(safe-area-inset-bottom, 0px), 14px) + clamp(1rem, 3.5vw, 1.6rem))' }}
