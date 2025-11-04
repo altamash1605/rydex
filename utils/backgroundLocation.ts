@@ -53,7 +53,7 @@ export async function startBackgroundTracking() {
         id: 'rydex-tracker',
         backgroundMessage: 'Rydex is tracking your ride…',
         backgroundTitle: 'Rydex Tracking',
-        distanceFilter: 10, // meters between updates
+        distanceFilter: 30, // meters between updates
         requestPermissions: true,
       } as any,
       async (location: any, error: any) => {
@@ -77,7 +77,24 @@ export async function startBackgroundTracking() {
         }
 
         await recordLocation([latitude, longitude], accuracy);
+
+        // also broadcast to Supabase in background
+        try {
+          const rounded = {
+            lat: Math.round(latitude * 100) / 100,
+            lng: Math.round(longitude * 100) / 100,
+          };
+          const { supabase } = await import('@/lib/supabaseClient');
+          await supabase
+            .channel('driver_heat')
+            .send({ type: 'broadcast', event: 'ping', payload: rounded });
+          console.log('📤 [BG] sent heat ping:', rounded);
+        } catch (err) {
+          console.warn('Supabase BG send error:', err);
+        }
+
         console.log('Background location:', location);
+
       }
     );
   } catch (err) {
