@@ -1,34 +1,40 @@
 import { useEffect, useRef, useState } from "react";
 import { supabase } from "@/lib/supabaseClient";
 
-type HeatPoint = { lat: number; lng: number };
+type HeatPoint = { lat: number; lng: number; ts: number }; // include timestamp
 
 // Round coords for privacy (~1 km precision)
 function roundCoord(value: number) {
   return Math.round(value * 100) / 100;
 }
 
+// points expire if not updated recently
+const EXPIRY_MS = 15000; // 15 seconds
+
 export function useRealtimeHeatmap(position?: { lat: number; lng: number }) {
   const [points, setPoints] = useState<HeatPoint[]>([]);
   const channelRef = useRef<ReturnType<typeof supabase.channel> | null>(null);
 
   useEffect(() => {
-    // Avoid recreating the channel on every render
+    // Create channel only once
     if (!channelRef.current) {
       channelRef.current = supabase.channel("driver_heat");
 
       channelRef.current.on("broadcast", { event: "ping" }, (payload) => {
-        const point = payload.payload as HeatPoint;
+        const incoming = payload.payload as { lat: number; lng: number };
+        const now = Date.now();
+        const point: HeatPoint = { ...incoming, ts: now };
 
         setPoints((prev) => {
-          // ✅ Avoid duplicates and keep list short (max 100 points)
+          // Filter out duplicates & expired points
           const key = `${point.lat},${point.lng}`;
-          const has = prev.some((p) => `${p.lat},${p.lng}` === key);
-          const updated = has ? prev : [...prev, point];
-          return updated.slice(-100);
+          const fresh = prev.filter(
+            (p) =>
+              Date.now() - p.ts < EXPIRY_MS && `${p.lat},${p.lng}` !== key
+          );
+          return [...fresh, point];
         });
 
-        // Debug log
         console.log("📥 received heat ping:", point);
       });
 
@@ -39,8 +45,8 @@ export function useRealtimeHeatmap(position?: { lat: number; lng: number }) {
 
     const channel = channelRef.current;
 
-    // Broadcast my own location every 5 s
-    const interval = setInterval(() => {
+    // 🔁 Broadcast my position every 5 seconds
+    const sendInterval = setInterval(() => {
       if (!position) return;
       const rounded = {
         lat: roundCoord(position.lat),
@@ -52,13 +58,22 @@ export function useRealtimeHeatmap(position?: { lat: number; lng: number }) {
       console.log("📤 sending heat ping:", rounded);
     }, 5000);
 
-    // Cleanup on unmount
+    // 🧹 Remove old/expired points regularly
+    const cleanupInterval = setInterval(() => {
+      setPoints((prev) => prev.filter((p) => Date.now() - p.ts < EXPIRY_MS));
+    }, 3000);
+
+    // 🧼 Cleanup on unmount
     return () => {
-      clearInterval(interval);
+      clearInterval(sendInterval);
+      clearInterval(cleanupInterval);
       channel?.unsubscribe();
       channelRef.current = null;
     };
   }, [position?.lat, position?.lng]);
 
-  return { points };
+  // Strip timestamps for the map layer
+  const heatPoints = points.map((p) => ({ lat: p.lat, lng: p.lng }));
+
+  return { points: heatPoints };
 }
