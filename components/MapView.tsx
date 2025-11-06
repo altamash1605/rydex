@@ -16,9 +16,9 @@ import DriverHeatmap from './DriverHeatmap';
 import { useRealtimeHeatmap } from '../hooks/useRealtimeHeatmap'; // ← NEW
 
 const MapContainer = dynamic(() => import('react-leaflet').then(m => m.MapContainer), { ssr: false });
-const TileLayer   = dynamic(() => import('react-leaflet').then(m => m.TileLayer),   { ssr: false });
-const Marker      = dynamic(() => import('react-leaflet').then(m => m.Marker),      { ssr: false });
-const Polyline    = dynamic(() => import('react-leaflet').then(m => m.Polyline),    { ssr: false });
+const TileLayer = dynamic(() => import('react-leaflet').then(m => m.TileLayer), { ssr: false });
+const Marker = dynamic(() => import('react-leaflet').then(m => m.Marker), { ssr: false });
+const Polyline = dynamic(() => import('react-leaflet').then(m => m.Polyline), { ssr: false });
 // 🔴 Debug overlay markers for backend tiles
 const CircleMarker = dynamic(() => import('react-leaflet').then(m => m.CircleMarker), { ssr: false });
 
@@ -57,6 +57,21 @@ export default function MapView() {
       }),
     [],
   );
+
+  // Create a dedicated pane for heat (so it never sits above markers)
+  useEffect(() => {
+    if (!mapReady) return;
+    const map = mapRef.current;
+    if (!map) return;
+
+    if (!map.getPane('pane-heat')) {
+      map.createPane('pane-heat');
+      const pane = map.getPane('pane-heat')!;
+      pane.classList.add('pane-heat'); // picks CSS rules we wrote
+      pane.style.pointerEvents = 'none';
+    }
+  }, [mapReady]);
+
 
   useEffect(() => {
     markerPositionRef.current = markerPosition;
