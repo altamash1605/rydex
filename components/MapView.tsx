@@ -435,13 +435,13 @@ export default function MapView() {
       animateBackToIdentity(true);
 
       const focusLatLng = anchorLatLng;
+      // --- PATCH START: keep map center locked while zooming ---
       window.requestAnimationFrame(() => {
-        if (focusLatLng) {
-          map.setZoomAround(focusLatLng, targetZoom, { animate: true });
-        } else {
-          map.setZoom(targetZoom, { animate: true });
-        }
+        // Always zoom around the map center instead of tap point
+        const centerLatLng = map.getCenter();
+        map.setZoomAround(centerLatLng, targetZoom, { animate: true });
       });
+      // --- PATCH END ---
 
       anchorPoint = null;
       anchorLatLng = null;
