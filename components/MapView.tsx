@@ -252,15 +252,18 @@ export default function MapView() {
     };
   }, []);
 
-  // Auto-follow
+  // --- PATCH START: Disable ALL automatic recentering after manual pan ---
   useEffect(() => {
     const map = mapRef.current;
+    if (!map || !isFollowing) return; // if user panned, do nothing
+
     const coords = currentPos.current;
-    if (map && coords && isFollowing) {
-      markProgrammaticMove();
-      map.setView([coords[0], coords[1]], map.getZoom(), { animate: true });
-    }
-  }, [path, isFollowing, currentPos]);
+    if (!coords) return;
+
+    markProgrammaticMove();
+    map.setView([coords[0], coords[1]], map.getZoom(), { animate: true });
+  }, [isFollowing]);
+  // --- PATCH END ---
 
   const handleRecenter = () => {
     const map = mapRef.current;
@@ -275,22 +278,19 @@ export default function MapView() {
     setShowPath(prev => !prev);
   };
 
-  // --- PATCH START: Fix delayed auto-recenter after manual pan ---
+  // --- PATCH START: Auto-center only once at startup (skip if user panned) ---
   useEffect(() => {
     if (!mapReady) return;
     const map = mapRef.current;
     const coords = currentPos.current;
     if (!map || !coords) return;
 
-    // Only run the first time map becomes ready
     if (hasAutoCentered.current) return;
     hasAutoCentered.current = true;
 
     const timeout = window.setTimeout(() => {
-      // Skip if user already panned (isFollowing was set false)
-      if (!isFollowing) return;
+      if (!isFollowing) return; // respect manual pan
       markProgrammaticMove();
-      setIsFollowing(true);
       map.setView([coords[0], coords[1]], map.getZoom(), { animate: true });
     }, 2000);
 
@@ -299,7 +299,6 @@ export default function MapView() {
     };
   }, [mapReady]);
   // --- PATCH END ---
-
 
   // --- Smooth double-tap-drag zoom (kept as-is) ---
   useEffect(() => {
