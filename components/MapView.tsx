@@ -13,14 +13,29 @@ import { useLeafletLayers } from './useLeafletLayers';
 import type { Map as LeafletMap } from 'leaflet';
 import L from 'leaflet';
 import DriverHeatmap from './DriverHeatmap';
-import { useRealtimeHeatmap } from '../hooks/useRealtimeHeatmap'; // ← NEW
+
+function getOrCreateDeviceId(): string {
+  try {
+    const key = 'rydex-device-id';
+    const existing = localStorage.getItem(key);
+    if (existing) return existing;
+    // RFC4122 v4 UUID generator
+    const uuid = 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, c => {
+      const r = (crypto.getRandomValues(new Uint8Array(1))[0] & 15);
+      const v = c === 'x' ? r : (r & 0x3) | 0x8;
+      return v.toString(16);
+    });
+    localStorage.setItem(key, uuid);
+    return uuid;
+  } catch {
+    return '00000000-0000-4000-8000-000000000000';
+  }
+}
 
 const MapContainer = dynamic(() => import('react-leaflet').then(m => m.MapContainer), { ssr: false });
-const TileLayer = dynamic(() => import('react-leaflet').then(m => m.TileLayer), { ssr: false });
-const Marker = dynamic(() => import('react-leaflet').then(m => m.Marker), { ssr: false });
-const Polyline = dynamic(() => import('react-leaflet').then(m => m.Polyline), { ssr: false });
-// 🔴 Debug overlay markers for backend tiles
-const CircleMarker = dynamic(() => import('react-leaflet').then(m => m.CircleMarker), { ssr: false });
+const TileLayer   = dynamic(() => import('react-leaflet').then(m => m.TileLayer),   { ssr: false });
+const Marker      = dynamic(() => import('react-leaflet').then(m => m.Marker),      { ssr: false });
+const Polyline    = dynamic(() => import('react-leaflet').then(m => m.Polyline),    { ssr: false });
 
 export default function MapView() {
   const mapRef = useRef<LeafletMap | null>(null);
@@ -58,20 +73,69 @@ export default function MapView() {
     [],
   );
 
-  // Create a dedicated pane for heat (so it never sits above markers)
+  // Dedicated pane for heat (keeps tiles under markers/UI)
   useEffect(() => {
     if (!mapReady) return;
     const map = mapRef.current;
     if (!map) return;
-
     if (!map.getPane('pane-heat')) {
       map.createPane('pane-heat');
       const pane = map.getPane('pane-heat')!;
-      pane.classList.add('pane-heat'); // picks CSS rules we wrote
+      pane.classList.add('pane-heat');
       pane.style.pointerEvents = 'none';
     }
   }, [mapReady]);
 
+  /* === Permanent lightweight uploader (5s cadence, 15m dedupe) === */
+  useEffect(() => {
+    const REF  = (process.env.NEXT_PUBLIC_SUPABASE_REF  || 'vuymzcnkhzhjuykrfavy').trim();
+    const ANON = (process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || '').trim();
+    const URL  = `https://${REF}.functions.supabase.co/update_driver_location`;
+
+    const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+    if (ANON) { headers.Authorization = `Bearer ${ANON}`; headers.apikey = ANON; }
+
+    const deviceId = getOrCreateDeviceId();
+
+    const haversineM = (a: [number, number], b: [number, number]) => {
+      const toRad = (d: number) => (d * Math.PI) / 180;
+      const R = 6371000;
+      const dLat = toRad(b[0] - a[0]);
+      const dLng = toRad(b[1] - a[1]);
+      const lat1 = toRad(a[0]);
+      const lat2 = toRad(b[0]);
+      const s = Math.sin(dLat/2)**2 + Math.cos(lat1)*Math.cos(lat2)*Math.sin(dLng/2)**2;
+      return 2 * R * Math.asin(Math.sqrt(s));
+    };
+
+    const CADENCE_MS = 5000;
+    const DEDUPE_M   = 15;
+    let lastSent: [number, number] | null = null;
+    let timer: number | undefined;
+
+    async function tick() {
+      const coords = currentPos.current;
+      if (!coords) return;
+      if (lastSent && haversineM(lastSent, coords) < DEDUPE_M) return;
+
+      const [lat, lng] = coords;
+      try {
+        const res = await fetch(URL, {
+          method: 'POST',
+          headers,
+          body: JSON.stringify({ lat, lng, ts: Date.now(), driver_id: deviceId }),
+        });
+        if (res.ok) lastSent = coords;
+      } catch {
+        /* ignore transient failures */
+      }
+    }
+
+    timer = window.setInterval(tick, CADENCE_MS);
+    tick(); // fire once on mount
+
+    return () => { if (timer) window.clearInterval(timer); };
+  }, []); // uses currentPos via closure
 
   useEffect(() => {
     markerPositionRef.current = markerPosition;
@@ -135,7 +199,7 @@ export default function MapView() {
     animateMarker(target);
   }, [path, currentPos, animateMarker]);
 
-  // Detect manual pan
+  // Detect manual pan to disable following
   useEffect(() => {
     const map = mapRef.current;
     if (!map) return;
@@ -199,7 +263,7 @@ export default function MapView() {
     };
   }, [path, mapReady]);
 
-  // --- Smooth double-tap-drag zoom block (unchanged) ---
+  // --- Smooth double-tap-drag zoom (kept as-is) ---
   useEffect(() => {
     if (!mapReady) return;
 
@@ -236,7 +300,6 @@ export default function MapView() {
     let rafId: number | null = null;
     let draggingDisabledForGesture = false;
 
-    const sensitivity = 200;
     const minZoom = map.getMinZoom();
     const maxZoom = map.getMaxZoom();
 
@@ -311,9 +374,7 @@ export default function MapView() {
       if (pointerId != null && container.releasePointerCapture) {
         try {
           container.releasePointerCapture(pointerId);
-        } catch {
-          // ignore
-        }
+        } catch { /* ignore */ }
       }
       pointerId = null;
 
@@ -362,8 +423,8 @@ export default function MapView() {
       const thisTapPoint = L.point(event.clientX - rect.left, event.clientY - rect.top);
 
       const delta = now - lastTapTime;
-      const inTimeWindow = delta >= 50 && delta <= 350;
-      const inSpatialWindow = lastTapPoint ? lastTapPoint.distanceTo(thisTapPoint) <= 18 : false;
+      const inTimeWindow = delta >= TAP_MIN_MS && delta <= TAP_MAX_MS;
+      const inSpatialWindow = lastTapPoint ? lastTapPoint.distanceTo(thisTapPoint) <= TAP_MOVE_TOL : false;
 
       if (activeTouchCount === 1 && inTimeWindow && inSpatialWindow) {
         pointerId = event.pointerId;
@@ -388,9 +449,7 @@ export default function MapView() {
         }
 
         if (container.setPointerCapture) {
-          try {
-            container.setPointerCapture(event.pointerId);
-          } catch { /* ignore */ }
+          try { container.setPointerCapture(event.pointerId); } catch {}
         }
 
         lastTapTime = 0;
@@ -419,13 +478,13 @@ export default function MapView() {
       }
 
       const previewScale = Math.pow(2, zoomAccumulator);
-      const safePreview = Math.max(0.6, Math.min(2.0, previewScale));
+      const safePreview = Math.max(PREVIEW_MIN, Math.min(PREVIEW_MAX, previewScale));
       lastScale = safePreview;
       applyVisualScale(safePreview);
 
-      while (Math.abs(zoomAccumulator) >= 0.20) {
-        const step = Math.sign(zoomAccumulator) * 0.20;
-        const nextZoom = Math.max(map.getMinZoom(), Math.min(map.getMaxZoom(), startZoom + step));
+      while (Math.abs(zoomAccumulator) >= COMMIT_STEP) {
+        const step = Math.sign(zoomAccumulator) * COMMIT_STEP;
+        const nextZoom = Math.max(minZoom, Math.min(maxZoom, startZoom + step));
 
         if (anchorLatLng) {
           map.setZoomAround(anchorLatLng, nextZoom, { animate: false });
@@ -437,7 +496,7 @@ export default function MapView() {
         zoomAccumulator -= step;
 
         const rescaled = Math.pow(2, zoomAccumulator);
-        applyVisualScale(Math.max(0.6, Math.min(2.0, rescaled)));
+        applyVisualScale(Math.max(PREVIEW_MIN, Math.min(PREVIEW_MAX, rescaled)));
       }
 
       event.preventDefault();
@@ -510,11 +569,6 @@ export default function MapView() {
   const lng = currentPos.current?.[1] ?? 0;
   const markerPoint = markerPosition ?? (currentPos.current ? [lat, lng] : null);
 
-  // 🔴 NEW: pull near-live + analytics tiles and render debug dots
-  const { points } = useRealtimeHeatmap(
-    currentPos.current ? { lat, lng } : undefined
-  );
-
   return (
     <div className="relative h-full w-full overflow-hidden bg-[#111827]">
       {/* Map layer */}
@@ -529,7 +583,7 @@ export default function MapView() {
           zoomSnap={0}
           zoomDelta={0.01}
         >
-          {/* Existing heat layer */}
+          {/* Heat tiles */}
           <DriverHeatmap />
 
           {/* Base tiles */}
@@ -537,16 +591,6 @@ export default function MapView() {
             url="https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png"
             attribution='&copy; <a href="https://carto.com/attributions">CARTO</a> &copy; OpenStreetMap contributors'
           />
-
-          {/* 🔴 TEMP DEBUG: draw each heat point as a visible red dot */}
-          {points.map((p, i) => (
-            <CircleMarker
-              key={`heat-${i}`}
-              center={[p.lat, p.lng]}
-              radius={6}
-              pathOptions={{ color: '#ff3b30', weight: 2, fillOpacity: 0.85 }}
-            />
-          ))}
 
           {/* User marker & path */}
           {markerPoint && <Marker position={markerPoint} icon={markerIcon} />}
@@ -577,7 +621,7 @@ export default function MapView() {
       >
         <div className="pointer-events-auto relative w-full max-w-sm">
           <div className="absolute -top-28 right-2 flex flex-col items-end gap-3">
-            <PathToggleButton isActive={showPath} onToggle={handleTogglePath} />
+            <PathToggleButton isActive={showPath} onToggle={() => setShowPath(v => !v)} />
             <RecenterButton onRecenter={handleRecenter} isFollowing={isFollowing} />
           </div>
           <ButtonBar />
