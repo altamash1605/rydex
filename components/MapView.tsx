@@ -33,9 +33,9 @@ function getOrCreateDeviceId(): string {
 }
 
 const MapContainer = dynamic(() => import('react-leaflet').then(m => m.MapContainer), { ssr: false });
-const TileLayer   = dynamic(() => import('react-leaflet').then(m => m.TileLayer),   { ssr: false });
-const Marker      = dynamic(() => import('react-leaflet').then(m => m.Marker),      { ssr: false });
-const Polyline    = dynamic(() => import('react-leaflet').then(m => m.Polyline),    { ssr: false });
+const TileLayer = dynamic(() => import('react-leaflet').then(m => m.TileLayer), { ssr: false });
+const Marker = dynamic(() => import('react-leaflet').then(m => m.Marker), { ssr: false });
+const Polyline = dynamic(() => import('react-leaflet').then(m => m.Polyline), { ssr: false });
 
 export default function MapView() {
   const mapRef = useRef<LeafletMap | null>(null);
@@ -86,11 +86,11 @@ export default function MapView() {
     }
   }, [mapReady]);
 
-  /* === Permanent lightweight uploader (5s cadence, 15m dedupe) === */
+  /* === Adaptive uploader: 5s when moving, 15s when stationary (<15 m) === */
   useEffect(() => {
-    const REF  = (process.env.NEXT_PUBLIC_SUPABASE_REF  || 'vuymzcnkhzhjuykrfavy').trim();
+    const REF = (process.env.NEXT_PUBLIC_SUPABASE_REF || 'vuymzcnkhzhjuykrfavy').trim();
     const ANON = (process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || '').trim();
-    const URL  = `https://${REF}.functions.supabase.co/update_driver_location`;
+    const URL = `https://${REF}.functions.supabase.co/update_driver_location`;
 
     const headers: Record<string, string> = { 'Content-Type': 'application/json' };
     if (ANON) { headers.Authorization = `Bearer ${ANON}`; headers.apikey = ANON; }
@@ -104,38 +104,68 @@ export default function MapView() {
       const dLng = toRad(b[1] - a[1]);
       const lat1 = toRad(a[0]);
       const lat2 = toRad(b[0]);
-      const s = Math.sin(dLat/2)**2 + Math.cos(lat1)*Math.cos(lat2)*Math.sin(dLng/2)**2;
+      const s = Math.sin(dLat / 2) ** 2 + Math.cos(lat1) * Math.cos(lat2) * Math.sin(dLng / 2) ** 2;
       return 2 * R * Math.asin(Math.sqrt(s));
     };
 
-    const CADENCE_MS = 5000;
-    const DEDUPE_M   = 15;
-    let lastSent: [number, number] | null = null;
+    const FAST_MS = 5000;   // when moving
+    const SLOW_MS = 15000;  // when stationary
+    const THRESHOLD_M = 15; // movement threshold
+
+    let lastCoord: [number, number] | null = null;
     let timer: number | undefined;
+    let isMounted = true;
 
-    async function tick() {
-      const coords = currentPos.current;
-      if (!coords) return;
-      if (lastSent && haversineM(lastSent, coords) < DEDUPE_M) return;
-
-      const [lat, lng] = coords;
+    async function send(lat: number, lng: number) {
       try {
-        const res = await fetch(URL, {
+        await fetch(URL, {
           method: 'POST',
           headers,
           body: JSON.stringify({ lat, lng, ts: Date.now(), driver_id: deviceId }),
         });
-        if (res.ok) lastSent = coords;
       } catch {
-        /* ignore transient failures */
+        /* ignore transient errors */
       }
     }
 
-    timer = window.setInterval(tick, CADENCE_MS);
-    tick(); // fire once on mount
+    function schedule(nextMs: number) {
+      if (!isMounted) return;
+      timer = window.setTimeout(tick, nextMs);
+    }
 
-    return () => { if (timer) window.clearInterval(timer); };
+    async function tick() {
+      if (!isMounted) return;
+
+      const coords = currentPos.current;
+      if (!coords) { schedule(SLOW_MS); return; }
+
+      const [lat, lng] = coords;
+
+      // Decide cadence based on movement since last check
+      let moved = true;
+      if (lastCoord) {
+        moved = haversineM(lastCoord, coords) >= THRESHOLD_M;
+      }
+
+      // Send now (both modes send; only the interval changes)
+      await send(lat, lng);
+
+      // Update lastCoord to current for next movement check
+      lastCoord = coords;
+
+      // Schedule next tick based on movement
+      schedule(moved ? FAST_MS : SLOW_MS);
+    }
+
+    // kick off immediately on mount
+    tick();
+
+    return () => {
+      isMounted = false;
+      if (timer) window.clearTimeout(timer);
+    };
   }, []); // uses currentPos via closure
+
 
   useEffect(() => {
     markerPositionRef.current = markerPosition;
@@ -449,7 +479,7 @@ export default function MapView() {
         }
 
         if (container.setPointerCapture) {
-          try { container.setPointerCapture(event.pointerId); } catch {}
+          try { container.setPointerCapture(event.pointerId); } catch { }
         }
 
         lastTapTime = 0;
