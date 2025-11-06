@@ -41,12 +41,20 @@ export default function MapView() {
   const mapRef = useRef<LeafletMap | null>(null);
   const { currentPos, path } = useGeoTracker();
   useLeafletLayers();
+
+  // --- NEW: lock initial center so GPS updates don't recenter via prop changes ---
+  const initialCenterRef = useRef<[number, number] | null>(null);
+  if (initialCenterRef.current === null) {
+    initialCenterRef.current = currentPos.current ?? [0, 0];
+  }
+
   const [isFollowing, setIsFollowing] = useState(false);
   const [showPath, setShowPath] = useState(true);
   const isProgrammaticMove = useRef(false);
   const programmaticResetTimeout = useRef<number | null>(null);
   const hasAutoCentered = useRef(false);
   const [mapReady, setMapReady] = useState(false);
+
   const [markerPosition, setMarkerPosition] = useState<[number, number] | null>(null);
   const markerAnimationFrame = useRef<number | null>(null);
   const markerPositionRef = useRef<[number, number] | null>(null);
@@ -223,13 +231,14 @@ export default function MapView() {
     [],
   );
 
+  // update marker position smoothly on GPS/path change
   useEffect(() => {
     const target = currentPos.current;
     if (!target) return;
     animateMarker(target);
   }, [path, currentPos, animateMarker]);
 
-  // Detect manual pan to disable following
+  // Detect manual pan to disable following (sticky until user taps recenter)
   useEffect(() => {
     const map = mapRef.current;
     if (!map) return;
@@ -242,7 +251,7 @@ export default function MapView() {
         }
         return;
       }
-      setIsFollowing(false);
+      setIsFollowing(false); // <-- stays false until RecenterButton sets true
     };
     map.on('movestart', handleUserMoveStart);
     map.on('zoomstart', handleUserMoveStart);
@@ -252,22 +261,21 @@ export default function MapView() {
     };
   }, []);
 
-  // Auto-follow
+  // --- CHANGED: Auto-follow now reacts to marker movement only, not every GPS/path change ---
   useEffect(() => {
     const map = mapRef.current;
-    const coords = currentPos.current;
-    if (map && coords && isFollowing) {
-      markProgrammaticMove();
-      map.setView([coords[0], coords[1]], map.getZoom(), { animate: true });
-    }
-  }, [path, isFollowing, currentPos]);
+    if (!map || !markerPosition) return;
+    if (!isFollowing) return; // respect sticky "manual pan" state
+    markProgrammaticMove();
+    map.setView([markerPosition[0], markerPosition[1]], map.getZoom(), { animate: true });
+  }, [isFollowing, markerPosition, mapReady]);
 
   const handleRecenter = () => {
     const map = mapRef.current;
     const coords = currentPos.current;
     if (!map || !coords) return;
     markProgrammaticMove();
-    setIsFollowing(true);
+    setIsFollowing(true); // user explicitly re-enables follow
     map.setView([coords[0], coords[1]], map.getZoom(), { animate: true });
   };
 
@@ -275,6 +283,7 @@ export default function MapView() {
     setShowPath(prev => !prev);
   };
 
+  // Initial auto-center once after mount
   useEffect(() => {
     if (!mapReady) return;
     const map = mapRef.current;
@@ -453,8 +462,8 @@ export default function MapView() {
       const thisTapPoint = L.point(event.clientX - rect.left, event.clientY - rect.top);
 
       const delta = now - lastTapTime;
-      const inTimeWindow = delta >= TAP_MIN_MS && delta <= TAP_MAX_MS;
-      const inSpatialWindow = lastTapPoint ? lastTapPoint.distanceTo(thisTapPoint) <= TAP_MOVE_TOL : false;
+      const inTimeWindow = delta >= 50 && delta <= 350;
+      const inSpatialWindow = lastTapPoint ? lastTapPoint.distanceTo(thisTapPoint) <= 18 : false;
 
       if (activeTouchCount === 1 && inTimeWindow && inSpatialWindow) {
         pointerId = event.pointerId;
@@ -508,12 +517,12 @@ export default function MapView() {
       }
 
       const previewScale = Math.pow(2, zoomAccumulator);
-      const safePreview = Math.max(PREVIEW_MIN, Math.min(PREVIEW_MAX, previewScale));
+      const safePreview = Math.max(0.6, Math.min(2.0, previewScale));
       lastScale = safePreview;
       applyVisualScale(safePreview);
 
-      while (Math.abs(zoomAccumulator) >= COMMIT_STEP) {
-        const step = Math.sign(zoomAccumulator) * COMMIT_STEP;
+      while (Math.abs(zoomAccumulator) >= 0.20) {
+        const step = Math.sign(zoomAccumulator) * 0.20;
         const nextZoom = Math.max(minZoom, Math.min(maxZoom, startZoom + step));
 
         if (anchorLatLng) {
@@ -526,7 +535,7 @@ export default function MapView() {
         zoomAccumulator -= step;
 
         const rescaled = Math.pow(2, zoomAccumulator);
-        applyVisualScale(Math.max(PREVIEW_MIN, Math.min(PREVIEW_MAX, rescaled)));
+        applyVisualScale(Math.max(0.6, Math.min(2.0, rescaled)));
       }
 
       event.preventDefault();
@@ -595,9 +604,8 @@ export default function MapView() {
     setMapReady(Boolean(instance));
   }, []);
 
-  const lat = currentPos.current?.[0] ?? 0;
-  const lng = currentPos.current?.[1] ?? 0;
-  const markerPoint = markerPosition ?? (currentPos.current ? [lat, lng] : null);
+  // NOTE: we no longer pass changing [lat,lng] to MapContainer center (locked via initialCenterRef)
+  const markerPoint = markerPosition ?? (currentPos.current ? [currentPos.current[0], currentPos.current[1]] : null);
 
   return (
     <div className="relative h-full w-full overflow-hidden bg-[#111827]">
@@ -605,7 +613,7 @@ export default function MapView() {
       <div className="absolute inset-0">
         <MapContainer
           ref={handleMapRef}
-          center={[lat, lng]}
+          center={initialCenterRef.current!}   // locked initial center
           zoom={16}
           style={{ height: '100%', width: '100%' }}
           zoomControl={false}
