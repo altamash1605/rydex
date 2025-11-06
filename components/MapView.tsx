@@ -40,19 +40,12 @@ export default function MapView() {
   const mapRef = useRef<LeafletMap | null>(null);
   const { currentPos, path } = useGeoTracker();
   useLeafletLayers();
-
-  const initialCenterRef = useRef<[number, number] | null>(null);
-  if (initialCenterRef.current === null) {
-    initialCenterRef.current = currentPos.current ?? [0, 0];
-  }
-
   const [isFollowing, setIsFollowing] = useState(false);
   const [showPath, setShowPath] = useState(true);
   const isProgrammaticMove = useRef(false);
   const programmaticResetTimeout = useRef<number | null>(null);
   const hasAutoCentered = useRef(false);
   const [mapReady, setMapReady] = useState(false);
-
   const [markerPosition, setMarkerPosition] = useState<[number, number] | null>(null);
   const markerAnimationFrame = useRef<number | null>(null);
   const markerPositionRef = useRef<[number, number] | null>(null);
@@ -79,6 +72,7 @@ export default function MapView() {
     [],
   );
 
+  // Dedicated pane for heat (keeps tiles under markers/UI)
   useEffect(() => {
     if (!mapReady) return;
     const map = mapRef.current;
@@ -91,7 +85,7 @@ export default function MapView() {
     }
   }, [mapReady]);
 
-  /* === Adaptive uploader === */
+  /* === Adaptive uploader: 5s when moving, 15s when stationary (<15 m) === */
   useEffect(() => {
     const REF = (process.env.NEXT_PUBLIC_SUPABASE_REF || 'vuymzcnkhzhjuykrfavy').trim();
     const ANON = (process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || '').trim();
@@ -101,6 +95,7 @@ export default function MapView() {
     if (ANON) { headers.Authorization = `Bearer ${ANON}`; headers.apikey = ANON; }
 
     const deviceId = getOrCreateDeviceId();
+
     const haversineM = (a: [number, number], b: [number, number]) => {
       const toRad = (d: number) => (d * Math.PI) / 180;
       const R = 6371000;
@@ -112,9 +107,9 @@ export default function MapView() {
       return 2 * R * Math.asin(Math.sqrt(s));
     };
 
-    const FAST_MS = 5000;
-    const SLOW_MS = 15000;
-    const THRESHOLD_M = 15;
+    const FAST_MS = 5000;   // when moving
+    const SLOW_MS = 15000;  // when stationary
+    const THRESHOLD_M = 15; // movement threshold
 
     let lastCoord: [number, number] | null = null;
     let timer: number | undefined;
@@ -127,7 +122,9 @@ export default function MapView() {
           headers,
           body: JSON.stringify({ lat, lng, ts: Date.now(), driver_id: deviceId }),
         });
-      } catch {}
+      } catch {
+        /* ignore transient errors */
+      }
     }
 
     function schedule(nextMs: number) {
@@ -137,22 +134,37 @@ export default function MapView() {
 
     async function tick() {
       if (!isMounted) return;
+
       const coords = currentPos.current;
       if (!coords) { schedule(SLOW_MS); return; }
+
       const [lat, lng] = coords;
+
+      // Decide cadence based on movement since last check
       let moved = true;
-      if (lastCoord) moved = haversineM(lastCoord, coords) >= THRESHOLD_M;
+      if (lastCoord) {
+        moved = haversineM(lastCoord, coords) >= THRESHOLD_M;
+      }
+
+      // Send now (both modes send; only the interval changes)
       await send(lat, lng);
+
+      // Update lastCoord to current for next movement check
       lastCoord = coords;
+
+      // Schedule next tick based on movement
       schedule(moved ? FAST_MS : SLOW_MS);
     }
 
+    // kick off immediately on mount
     tick();
+
     return () => {
       isMounted = false;
       if (timer) window.clearTimeout(timer);
     };
-  }, []);
+  }, []); // uses currentPos via closure
+
 
   useEffect(() => {
     markerPositionRef.current = markerPosition;
@@ -169,16 +181,20 @@ export default function MapView() {
   const animateMarker = useCallback(
     (target: [number, number]) => {
       if (!target) return;
+
       const start = markerPositionRef.current;
       if (!start) {
         markerPositionRef.current = target;
         setMarkerPosition(target);
         return;
       }
+
       if (start[0] === target[0] && start[1] === target[1]) return;
+
       if (markerAnimationFrame.current != null) {
         window.cancelAnimationFrame(markerAnimationFrame.current);
       }
+
       const startTime = performance.now();
       const duration = 650;
 
@@ -191,6 +207,7 @@ export default function MapView() {
         const nextPos: [number, number] = [nextLat, nextLng];
         markerPositionRef.current = nextPos;
         setMarkerPosition(nextPos);
+
         if (t < 1) {
           markerAnimationFrame.current = window.requestAnimationFrame(step);
         } else {
@@ -199,6 +216,7 @@ export default function MapView() {
           setMarkerPosition(target);
         }
       };
+
       markerAnimationFrame.current = window.requestAnimationFrame(step);
     },
     [],
@@ -210,7 +228,7 @@ export default function MapView() {
     animateMarker(target);
   }, [path, currentPos, animateMarker]);
 
-  // Disable auto-follow on manual pan
+  // Detect manual pan to disable following
   useEffect(() => {
     const map = mapRef.current;
     if (!map) return;
@@ -233,14 +251,15 @@ export default function MapView() {
     };
   }, []);
 
-  // Auto-follow (only when isFollowing = true)
+  // Auto-follow
   useEffect(() => {
     const map = mapRef.current;
-    if (!map || !markerPosition) return;
-    if (!isFollowing) return;
-    markProgrammaticMove();
-    map.setView([markerPosition[0], markerPosition[1]], map.getZoom(), { animate: true });
-  }, [isFollowing, markerPosition, mapReady]);
+    const coords = currentPos.current;
+    if (map && coords && isFollowing) {
+      markProgrammaticMove();
+      map.setView([coords[0], coords[1]], map.getZoom(), { animate: true });
+    }
+  }, [path, isFollowing, currentPos]);
 
   const handleRecenter = () => {
     const map = mapRef.current;
@@ -251,33 +270,36 @@ export default function MapView() {
     map.setView([coords[0], coords[1]], map.getZoom(), { animate: true });
   };
 
-  const handleTogglePath = () => setShowPath(prev => !prev);
+  const handleTogglePath = () => {
+    setShowPath(prev => !prev);
+  };
 
-  // --- PATCH START: Fix delayed recenter (run only once, skip if user panned) ---
+  // --- PATCH START: Fix delayed auto-recenter after manual pan ---
   useEffect(() => {
     if (!mapReady) return;
     const map = mapRef.current;
     const coords = currentPos.current;
     if (!map || !coords) return;
 
-    // Only run the first time map becomes ready
+    // Only auto-center once, and only if user hasn't panned yet
     if (hasAutoCentered.current) return;
     hasAutoCentered.current = true;
 
     const timeout = window.setTimeout(() => {
-      // Only center if user has not manually panned yet
-      if (isFollowing === false) {
-        markProgrammaticMove();
-        setIsFollowing(true);
-        map.setView([coords[0], coords[1]], map.getZoom(), { animate: true });
-      }
+      // Skip if user already panned (isFollowing was set false)
+      if (isFollowing) return;
+      markProgrammaticMove();
+      setIsFollowing(true);
+      map.setView([coords[0], coords[1]], map.getZoom(), { animate: true });
     }, 2000);
 
-    return () => window.clearTimeout(timeout);
+    return () => {
+      window.clearTimeout(timeout);
+    };
   }, [mapReady]);
   // --- PATCH END ---
 
-  // (unchanged double-tap zoom section below)
+  // --- Smooth double-tap-drag zoom (kept as-is) ---
   useEffect(() => {
     if (!mapReady) return;
     const map = mapRef.current;
@@ -316,14 +338,17 @@ export default function MapView() {
     setMapReady(Boolean(instance));
   }, []);
 
-  const markerPoint = markerPosition ?? (currentPos.current ? [currentPos.current[0], currentPos.current[1]] : null);
+  const lat = currentPos.current?.[0] ?? 0;
+  const lng = currentPos.current?.[1] ?? 0;
+  const markerPoint = markerPosition ?? (currentPos.current ? [lat, lng] : null);
 
   return (
     <div className="relative h-full w-full overflow-hidden bg-[#111827]">
+      {/* Map layer */}
       <div className="absolute inset-0">
         <MapContainer
           ref={handleMapRef}
-          center={initialCenterRef.current!}
+          center={[lat, lng]}
           zoom={16}
           style={{ height: '100%', width: '100%' }}
           zoomControl={false}
@@ -331,19 +356,28 @@ export default function MapView() {
           zoomSnap={0}
           zoomDelta={0.01}
         >
+          {/* Heat tiles */}
           <DriverHeatmap />
+
+          {/* Base tiles */}
           <TileLayer
             url="https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png"
             attribution='&copy; <a href="https://carto.com/attributions">CARTO</a> &copy; OpenStreetMap contributors'
           />
+
+          {/* User marker & path */}
           {markerPoint && <Marker position={markerPoint} icon={markerIcon} />}
           {showPath && path.length > 1 && <Polyline positions={path} color="#fb923c" weight={4} />}
         </MapContainer>
       </div>
 
+      {/* Atmospheric layers */}
       <div className="pointer-events-none absolute inset-x-0 top-0 h-[24%] bg-[linear-gradient(180deg,rgba(17,24,39,0.85)_0%,rgba(17,24,39,0.25)_70%,rgba(17,24,39,0)_100%)]" />
       <div className="pointer-events-none absolute inset-x-0 bottom-0 h-[45%] bg-[linear-gradient(180deg,rgba(17,24,39,0)_0%,rgba(17,24,39,0.55)_45%,rgba(17,24,39,0.9)_100%)]" />
 
+      {/* --- Floating Overlays --- */}
+
+      {/* Top HUD */}
       <div
         className="rydex-overlay pointer-events-none absolute inset-x-0 top-0 flex justify-center px-6"
         style={{ paddingTop: 'calc(env(safe-area-inset-top, 1rem) + 1rem)' }}
@@ -353,6 +387,7 @@ export default function MapView() {
         </div>
       </div>
 
+      {/* Bottom Buttons */}
       <div
         className="rydex-overlay rydex-overlay-bottom pointer-events-none absolute inset-x-0 bottom-0 flex justify-center px-4 sm:px-6"
         style={{ paddingBottom: 'calc(max(env(safe-area-inset-bottom, 0px), 14px) + clamp(1rem, 3.5vw, 1.6rem))' }}
