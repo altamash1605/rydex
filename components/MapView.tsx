@@ -108,9 +108,9 @@ export default function MapView() {
       return 2 * R * Math.asin(Math.sqrt(s));
     };
 
-    const FAST_MS = 5000;   // when moving
-    const SLOW_MS = 15000;  // when stationary
-    const THRESHOLD_M = 15; // movement threshold
+    const FAST_MS = 5000;
+    const SLOW_MS = 15000;
+    const THRESHOLD_M = 15;
 
     let lastCoord: [number, number] | null = null;
     let timer: number | undefined;
@@ -141,31 +141,25 @@ export default function MapView() {
 
       const [lat, lng] = coords;
 
-      // Decide cadence based on movement since last check
       let moved = true;
       if (lastCoord) {
         moved = haversineM(lastCoord, coords) >= THRESHOLD_M;
       }
 
-      // Send now (both modes send; only the interval changes)
       await send(lat, lng);
 
-      // Update lastCoord to current for next movement check
       lastCoord = coords;
 
-      // Schedule next tick based on movement
       schedule(moved ? FAST_MS : SLOW_MS);
     }
 
-    // kick off immediately on mount
     tick();
 
     return () => {
       isMounted = false;
       if (timer) window.clearTimeout(timer);
     };
-  }, []); // uses currentPos via closure
-
+  }, []);
 
   useEffect(() => {
     markerPositionRef.current = markerPosition;
@@ -229,7 +223,6 @@ export default function MapView() {
     animateMarker(target);
   }, [path, currentPos, animateMarker]);
 
-  // Detect manual pan to disable following
   useEffect(() => {
     const map = mapRef.current;
     if (!map) return;
@@ -252,17 +245,17 @@ export default function MapView() {
     };
   }, []);
 
-  // --- PATCH START: Disable ALL automatic recentering after manual pan ---
+  // --- PATCH START: Auto-follow continuously while following is enabled ---
   useEffect(() => {
     const map = mapRef.current;
-    if (!map || !isFollowing) return; // if user panned, do nothing
+    if (!map || !isFollowing) return;
 
     const coords = currentPos.current;
     if (!coords) return;
 
     markProgrammaticMove();
     map.setView([coords[0], coords[1]], map.getZoom(), { animate: true });
-  }, [isFollowing]);
+  }, [isFollowing, path]);
   // --- PATCH END ---
 
   const handleRecenter = () => {
@@ -278,7 +271,6 @@ export default function MapView() {
     setShowPath(prev => !prev);
   };
 
-  // --- PATCH START: Auto-center only once at startup (skip if user panned) ---
   useEffect(() => {
     if (!mapReady) return;
     const map = mapRef.current;
@@ -289,7 +281,7 @@ export default function MapView() {
     hasAutoCentered.current = true;
 
     const timeout = window.setTimeout(() => {
-      if (!isFollowing) return; // respect manual pan
+      if (!isFollowing) return;
       markProgrammaticMove();
       map.setView([coords[0], coords[1]], map.getZoom(), { animate: true });
     }, 2000);
@@ -298,9 +290,7 @@ export default function MapView() {
       window.clearTimeout(timeout);
     };
   }, [mapReady]);
-  // --- PATCH END ---
 
-  // --- Smooth double-tap-drag zoom (kept as-is) ---
   useEffect(() => {
     if (!mapReady) return;
 
@@ -349,7 +339,7 @@ export default function MapView() {
 
     const TAP_MIN_MS = 50;
     const TAP_MAX_MS = 350;
-    const TAP_MOVE_TOL = 18; // px
+    const TAP_MOVE_TOL = 18;
     let lastTapPoint: L.Point | null = null;
     let activeTouchCount = 0;
 
@@ -411,7 +401,7 @@ export default function MapView() {
       if (pointerId != null && container.releasePointerCapture) {
         try {
           container.releasePointerCapture(pointerId);
-        } catch { /* ignore */ }
+        } catch { }
       }
       pointerId = null;
 
@@ -434,14 +424,10 @@ export default function MapView() {
       const targetZoom = Math.max(minZoom, Math.min(maxZoom, startZoom + zoomAccumulator));
       animateBackToIdentity(true);
 
-      const focusLatLng = anchorLatLng;
-      // --- PATCH START: keep map center locked while zooming ---
       window.requestAnimationFrame(() => {
-        // Always zoom around the map center instead of tap point
         const centerLatLng = map.getCenter();
         map.setZoomAround(centerLatLng, targetZoom, { animate: true });
       });
-      // --- PATCH END ---
 
       anchorPoint = null;
       anchorLatLng = null;
@@ -507,7 +493,7 @@ export default function MapView() {
       const dy = event.clientY - lastYDuringGesture;
       lastYDuringGesture = event.clientY;
 
-      const dz = dy / 200; // 200px ≈ 1 zoom
+      const dz = dy / 200;
       zoomAccumulator += dz;
 
       if (!movedDuringGesture && Math.abs(zoomAccumulator) > 0.01) {
@@ -541,129 +527,4 @@ export default function MapView() {
     };
 
     const finishGesture = (event: PointerEvent) => {
-      if (!gestureActive || (pointerId != null && event.pointerId !== pointerId)) return;
-
-      if (movedDuringGesture) {
-        endGesture(true);
-      } else {
-        endGesture(false);
-        map.zoomIn(1, { animate: true });
-      }
-
-      lastTapTime = 0;
-      event.preventDefault();
-      event.stopPropagation();
-    };
-
-    const handlePointerUp = (event: PointerEvent) => {
-      if (event.pointerType === 'touch') activeTouchCount = Math.max(0, activeTouchCount - 1);
-      finishGesture(event);
-    };
-
-    const handlePointerCancel = (event: PointerEvent) => {
-      if (event.pointerType === 'touch') activeTouchCount = Math.max(0, activeTouchCount - 1);
-      if (!gestureActive || (pointerId != null && event.pointerId !== pointerId)) return;
-      endGesture(false);
-      lastTapTime = 0;
-    };
-
-    container.addEventListener('pointerdown', handlePointerDown, { passive: false });
-    container.addEventListener('pointermove', handlePointerMove, { passive: false });
-    container.addEventListener('pointerup', handlePointerUp, { passive: false });
-    container.addEventListener('pointercancel', handlePointerCancel);
-    container.addEventListener('pointerleave', handlePointerCancel);
-
-    return () => {
-      container.style.touchAction = prevTouchAction;
-
-      if (rafId != null) window.cancelAnimationFrame(rafId);
-      container.removeEventListener('pointerdown', handlePointerDown);
-      container.removeEventListener('pointermove', handlePointerMove);
-      container.removeEventListener('pointerup', handlePointerUp);
-      container.removeEventListener('pointercancel', handlePointerCancel);
-      container.removeEventListener('pointerleave', handlePointerCancel);
-      endGesture(false);
-      map.options.zoomSnap = previousZoomSnap;
-      map.options.zoomDelta = previousZoomDelta;
-      map.doubleClickZoom.enable();
-    };
-  }, [mapReady]);
-
-  useEffect(() => {
-    return () => {
-      if (programmaticResetTimeout.current) {
-        window.clearTimeout(programmaticResetTimeout.current);
-      }
-    };
-  }, []);
-
-  const handleMapRef = useCallback((instance: LeafletMap | null) => {
-    mapRef.current = instance;
-    setMapReady(Boolean(instance));
-  }, []);
-
-  const lat = currentPos.current?.[0] ?? 0;
-  const lng = currentPos.current?.[1] ?? 0;
-  const markerPoint = markerPosition ?? (currentPos.current ? [lat, lng] : null);
-
-  return (
-    <div className="relative h-full w-full overflow-hidden bg-[#111827]">
-      {/* Map layer */}
-      <div className="absolute inset-0">
-        <MapContainer
-          ref={handleMapRef}
-          center={[lat, lng]}
-          zoom={16}
-          style={{ height: '100%', width: '100%' }}
-          zoomControl={false}
-          doubleClickZoom={false}
-          zoomSnap={0}
-          zoomDelta={0.01}
-        >
-          {/* Heat tiles */}
-          <DriverHeatmap />
-
-          {/* Base tiles */}
-          <TileLayer
-            url="https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png"
-            attribution='&copy; <a href="https://carto.com/attributions">CARTO</a> &copy; OpenStreetMap contributors'
-          />
-
-          {/* User marker & path */}
-          {markerPoint && <Marker position={markerPoint} icon={markerIcon} />}
-          {showPath && path.length > 1 && <Polyline positions={path} color="#fb923c" weight={4} />}
-        </MapContainer>
-      </div>
-
-      {/* Atmospheric layers */}
-      <div className="pointer-events-none absolute inset-x-0 top-0 h-[24%] bg-[linear-gradient(180deg,rgba(17,24,39,0.85)_0%,rgba(17,24,39,0.25)_70%,rgba(17,24,39,0)_100%)]" />
-      <div className="pointer-events-none absolute inset-x-0 bottom-0 h-[45%] bg-[linear-gradient(180deg,rgba(17,24,39,0)_0%,rgba(17,24,39,0.55)_45%,rgba(17,24,39,0.9)_100%)]" />
-
-      {/* --- Floating Overlays --- */}
-
-      {/* Top HUD */}
-      <div
-        className="rydex-overlay pointer-events-none absolute inset-x-0 top-0 flex justify-center px-6"
-        style={{ paddingTop: 'calc(env(safe-area-inset-top, 1rem) + 1rem)' }}
-      >
-        <div className="pointer-events-auto w-full max-w-xl">
-          <SpeedHUD />
-        </div>
-      </div>
-
-      {/* Bottom Buttons */}
-      <div
-        className="rydex-overlay rydex-overlay-bottom pointer-events-none absolute inset-x-0 bottom-0 flex justify-center px-4 sm:px-6"
-        style={{ paddingBottom: 'calc(max(env(safe-area-inset-bottom, 0px), 14px) + clamp(1rem, 3.5vw, 1.6rem))' }}
-      >
-        <div className="pointer-events-auto relative w-full max-w-sm">
-          <div className="absolute -top-28 right-2 flex flex-col items-end gap-3">
-            <PathToggleButton isActive={showPath} onToggle={() => setShowPath(v => !v)} />
-            <RecenterButton onRecenter={handleRecenter} isFollowing={isFollowing} />
-          </div>
-          <ButtonBar />
-        </div>
-      </div>
-    </div>
-  );
-}
+      if (!gestureActive || (pointerId != null &&
