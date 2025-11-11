@@ -527,4 +527,129 @@ export default function MapView() {
     };
 
     const finishGesture = (event: PointerEvent) => {
-      if (!gestureActive || (pointerId != null &&
+  if (!gestureActive || (pointerId != null && event.pointerId !== pointerId)) return;
+
+  if (movedDuringGesture) {
+    endGesture(true);
+  } else {
+    endGesture(false);
+    map.zoomIn(1, { animate: true });
+  }
+
+  lastTapTime = 0;
+  event.preventDefault();
+  event.stopPropagation();
+};
+
+const handlePointerUp = (event: PointerEvent) => {
+  if (event.pointerType === 'touch') activeTouchCount = Math.max(0, activeTouchCount - 1);
+  finishGesture(event);
+};
+
+const handlePointerCancel = (event: PointerEvent) => {
+  if (event.pointerType === 'touch') activeTouchCount = Math.max(0, activeTouchCount - 1);
+  if (!gestureActive || (pointerId != null && event.pointerId !== pointerId)) return;
+  endGesture(false);
+  lastTapTime = 0;
+};
+
+container.addEventListener('pointerdown', handlePointerDown, { passive: false });
+container.addEventListener('pointermove', handlePointerMove, { passive: false });
+container.addEventListener('pointerup', handlePointerUp, { passive: false });
+container.addEventListener('pointercancel', handlePointerCancel);
+container.addEventListener('pointerleave', handlePointerCancel);
+
+return () => {
+  container.style.touchAction = prevTouchAction;
+
+  if (rafId != null) window.cancelAnimationFrame(rafId);
+  container.removeEventListener('pointerdown', handlePointerDown);
+  container.removeEventListener('pointermove', handlePointerMove);
+  container.removeEventListener('pointerup', handlePointerUp);
+  container.removeEventListener('pointercancel', handlePointerCancel);
+  container.removeEventListener('pointerleave', handlePointerCancel);
+  endGesture(false);
+  map.options.zoomSnap = previousZoomSnap;
+  map.options.zoomDelta = previousZoomDelta;
+  map.doubleClickZoom.enable();
+};
+  }, [mapReady]);
+
+  useEffect(() => {
+    return () => {
+      if (programmaticResetTimeout.current) {
+        window.clearTimeout(programmaticResetTimeout.current);
+      }
+    };
+  }, []);
+
+  const handleMapRef = useCallback((instance: LeafletMap | null) => {
+    mapRef.current = instance;
+    setMapReady(Boolean(instance));
+  }, []);
+
+  const lat = currentPos.current?.[0] ?? 0;
+  const lng = currentPos.current?.[1] ?? 0;
+  const markerPoint = markerPosition ?? (currentPos.current ? [lat, lng] : null);
+
+  return (
+    <div className="relative h-full w-full overflow-hidden bg-[#111827]">
+      {/* Map layer */}
+      <div className="absolute inset-0">
+        <MapContainer
+          ref={handleMapRef}
+          center={[lat, lng]}
+          zoom={16}
+          style={{ height: '100%', width: '100%' }}
+          zoomControl={false}
+          doubleClickZoom={false}
+          zoomSnap={0}
+          zoomDelta={0.01}
+        >
+          {/* Heat tiles */}
+          <DriverHeatmap />
+
+          {/* Base tiles */}
+          <TileLayer
+            url="https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png"
+            attribution='&copy; <a href="https://carto.com/attributions">CARTO</a> &copy; OpenStreetMap contributors'
+          />
+
+          {/* User marker & path */}
+          {markerPoint && <Marker position={markerPoint} icon={markerIcon} />}
+          {showPath && path.length > 1 && <Polyline positions={path} color="#fb923c" weight={4} />}
+        </MapContainer>
+      </div>
+
+      {/* Atmospheric layers */}
+      <div className="pointer-events-none absolute inset-x-0 top-0 h-[24%] bg-[linear-gradient(180deg,rgba(17,24,39,0.85)_0%,rgba(17,24,39,0.25)_70%,rgba(17,24,39,0)_100%)]" />
+      <div className="pointer-events-none absolute inset-x-0 bottom-0 h-[45%] bg-[linear-gradient(180deg,rgba(17,24,39,0)_0%,rgba(17,24,39,0.55)_45%,rgba(17,24,39,0.9)_100%)]" />
+
+      {/* --- Floating Overlays --- */}
+
+      {/* Top HUD */}
+      <div
+        className="rydex-overlay pointer-events-none absolute inset-x-0 top-0 flex justify-center px-6"
+        style={{ paddingTop: 'calc(env(safe-area-inset-top, 1rem) + 1rem)' }}
+      >
+        <div className="pointer-events-auto w-full max-w-xl">
+          <SpeedHUD />
+        </div>
+      </div>
+
+      {/* Bottom Buttons */}
+      <div
+        className="rydex-overlay rydex-overlay-bottom pointer-events-none absolute inset-x-0 bottom-0 flex justify-center px-4 sm:px-6"
+        style={{ paddingBottom: 'calc(max(env(safe-area-inset-bottom, 0px), 14px) + clamp(1rem, 3.5vw, 1.6rem))' }}
+      >
+        <div className="pointer-events-auto relative w-full max-w-sm">
+          <div className="absolute -top-28 right-2 flex flex-col items-end gap-3">
+            <PathToggleButton isActive={showPath} onToggle={() => setShowPath(v => !v)} />
+            <RecenterButton onRecenter={handleRecenter} isFollowing={isFollowing} />
+          </div>
+          <ButtonBar />
+        </div>
+      </div>
+    </div>
+  );
+}
